@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+
+  app_prod:
+    image: marcortola/php-fpm-nginx
+    restart: on-failure
+    ports:
+      - '10000:80'
+    volumes:
+      - ./:/var/www
+      - ./etc/nginx/site.conf:/etc/nginx/conf.d/site.conf
+
+  app_dev:
+    image: marcortola/php-fpm-nginx:dev
+    restart: on-failure
+    ports:
+      - '10001:80'
+    volumes:
+      - ./:/var/www
+      - ./etc/nginx/site.conf:/etc/nginx/conf.d/site.conf
+    environment:
+      - XDEBUG_MODE=${XDEBUG_MODE:-debug}
+    extra_hosts:
+      - host.docker.internal:host-gateway
