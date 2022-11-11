@@ -19,7 +19,6 @@ ENV USER=www-data \
 # Install dependencies
 RUN apt-get update \
     && apt-get -y --no-install-recommends --no-install-suggests install \
-        libfcgi0ldbl \
         nginx \
         supervisor \
     && apt-get clean \
@@ -35,13 +34,16 @@ RUN install-php-extensions \
 # Prepare Nginx
 RUN chown -R $USER:$USER /var/www/html/ \
     && rm -rf /usr/share/doc/* /var/www/html/* \
-    && rm -f /etc/nginx/sites-enabled/*
+    && rm -f /etc/nginx/sites-enabled/* \
+    && ln -sf /dev/stdout /var/log/nginx/access.log \
+	&& ln -sf /dev/stderr /var/log/nginx/error.log
 
 # Copy config files
 COPY supervisor/supervisor.conf /etc/supervisor/conf.d/supervisor.conf
 COPY php/php.ini $PHP_INI_DIR/conf.d/custom-php.ini
 COPY php/php-fpm.conf /usr/local/etc/php-fpm.d/zz-docker.conf
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
+COPY nginx/site-default.conf /etc/nginx/conf.d/site-default.conf
 
 WORKDIR /var/www
 
@@ -49,7 +51,7 @@ EXPOSE 80
 
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 RUN chmod +x /usr/local/bin/healthcheck.sh
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD ["healthcheck.sh"]
+HEALTHCHECK --interval=10s --timeout=3s CMD ["healthcheck.sh"]
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

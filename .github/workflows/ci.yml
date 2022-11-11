@@ -40,6 +40,7 @@ jobs:
         run: docker run -d --rm --name php_fpm_nginx -p 10000:80 php-fpm-nginx:ci
 
       - name: Wait for container
+        timeout-minutes: 1
         run: |
           while status="$(docker inspect -f '{{ .State.Health.Status }}' php_fpm_nginx)"; do
             case $status in
