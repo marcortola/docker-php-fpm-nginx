@@ -44,6 +44,8 @@ COPY php/php.ini $PHP_INI_DIR/conf.d/custom-php.ini
 COPY php/php-fpm.conf /usr/local/etc/php-fpm.d/zz-docker.conf
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY nginx/site-default.conf /etc/nginx/conf.d/site-default.conf
+COPY nginx/tune-worker-processes.sh /usr/local/bin/tune-worker-processes.sh
+RUN chmod +x /usr/local/bin/tune-worker-processes.sh
 
 WORKDIR /var/www
 
