@@ -35,6 +35,8 @@ RUN install-php-extensions \
 RUN chown -R $USER:$USER /var/www/html/ \
     && rm -rf /usr/share/doc/* /var/www/html/* \
     && rm -f /etc/nginx/sites-enabled/* \
+    && mkdir -p /etc/nginx/server-blocks/ \
+    && mkdir -p /etc/nginx/site-default/ \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
 	&& ln -sf /dev/stderr /var/log/nginx/error.log
 
@@ -43,7 +45,6 @@ COPY supervisor/supervisor.conf /etc/supervisor/conf.d/supervisor.conf
 COPY php/php.ini $PHP_INI_DIR/conf.d/custom-php.ini
 COPY php/php-fpm.conf /usr/local/etc/php-fpm.d/zz-docker.conf
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
-COPY nginx/site-default.conf /etc/nginx/conf.d/site-default.conf
 COPY nginx/tune-worker-processes.sh /usr/local/bin/tune-worker-processes.sh
 RUN chmod +x /usr/local/bin/tune-worker-processes.sh
 
@@ -61,11 +62,11 @@ ENTRYPOINT ["entrypoint.sh"]
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisor.conf", "--nodaemon"]
 
-### DEV ###
-FROM base as dev
+### DEBUG ###
+FROM base as debug
 ENV APP_ENV=dev \
     APP_DEBUG=true \
     XDEBUG_MODE=debug
 RUN install-php-extensions \
     xdebug
-COPY php/php_dev.ini $PHP_INI_DIR/conf.d/custom-php_dev.ini
+COPY php/php_debug.ini $PHP_INI_DIR/conf.d/custom-php_debug.ini

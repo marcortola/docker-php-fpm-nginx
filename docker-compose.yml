@@ -12,7 +12,7 @@ services:
       - ./etc/nginx/site.conf:/etc/nginx/conf.d/site.conf
 
   app_dev:
-    image: marcortola/php-fpm-nginx:dev
+    image: marcortola/php-fpm-nginx:debug
     restart: on-failure
     ports:
       - '10001:80'
