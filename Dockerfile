@@ -1,9 +1,10 @@
 ARG PHP_VERSION=7.4
+ARG USER=www-data
 
 ### BASE ###
-FROM php:${PHP_VERSION}-fpm as base
-
-ENV USER=www-data \
+FROM php:${PHP_VERSION}-fpm-alpine as base
+ARG USER
+ENV USER=${USER} \
     APP_ENV=prod \
     APP_DEBUG=false \
     FPM_PM_MAX_CHILDREN=20 \
@@ -17,14 +18,11 @@ ENV USER=www-data \
     NGINX_KEEPALIVE_TIMEOUT=65
 
 # Install dependencies
-RUN apt-get update \
-    && apt-get -y --no-install-recommends --no-install-suggests install \
+RUN apk add --update --no-cache \
         nginx \
-        supervisor \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+        supervisor
 
-# Install PHP extensions
+# Prepare PHP
 COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
 RUN install-php-extensions \
     intl \
@@ -65,8 +63,7 @@ CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisor.conf", "--nodaemon"
 
 ### DEBUG ###
 FROM base as debug
-ENV USER=www-data \
-    APP_ENV=dev \
+ENV APP_ENV=dev \
     APP_DEBUG=true \
     XDEBUG_MODE=debug
 RUN install-php-extensions \

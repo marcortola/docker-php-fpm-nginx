@@ -181,4 +181,4 @@ ncpu=$(printf "%s\n%s\n%s\n%s\n%s\n" \
   sort -n |
   head -n 1)
 
-perl -p -i -e "s/<nginx_worker_processes>/${ncpu}/g" "$NGINX_CONFIG_FILE"
+sed -i "s/<nginx_worker_processes>/${ncpu}/g" "$NGINX_CONFIG_FILE"
