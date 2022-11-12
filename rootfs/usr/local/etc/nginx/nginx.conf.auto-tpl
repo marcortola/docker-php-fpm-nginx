@@ -1,12 +1,12 @@
-user <user>;
-worker_processes <nginx_worker_processes>;
+user $USER;
+worker_processes $NGINX_WORKER_PROCESSES;
 worker_rlimit_nofile 8192;
 
 error_log /var/log/nginx/error.log warn;
 pid /var/run/nginx.pid;
 
 events {
-    worker_connections <nginx_worker_connections>;
+    worker_connections $NGINX_WORKER_CONNECTIONS;
     multi_accept on;
 }
 
@@ -23,12 +23,13 @@ http {
                        '"$request" $status  $body_bytes_sent "$http_referer" '
                        '"$http_user_agent" "$http_x_forwarded_for"';
 
+    server_tokens off;
     sendfile on;
     tcp_nopush on;
     tcp_nodelay on;
     types_hash_max_size 2048;
 
-    keepalive_timeout <nginx_keepalive_timeout>;
+    keepalive_timeout $NGINX_KEEPALIVE_TIMEOUT;
 
     ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
     ssl_prefer_server_ciphers on;
@@ -41,7 +42,7 @@ http {
                text/xml application/xml application/xml+rss image/svg+xml
                application/vnd.ms-fontobject application/x-font-ttf font/opentype;
 
-    include /etc/nginx/server-blocks/*.conf;
+    include /etc/nginx/servers/*.conf;
 
     server {
         listen 80 default_server;
@@ -58,13 +59,13 @@ http {
             log_not_found off;
         }
 
-        include  /etc/nginx/site-default/*.conf;
+        include  /etc/nginx/server-default/*.conf;
 
         location ~ ^/healthcheck-ping$ {
             allow 127.0.0.1;
             deny all;
             access_log off;
-            include fastcgi_params;
+            include /etc/nginx/fastcgi_params;
             fastcgi_read_timeout 5s;
             fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
             fastcgi_pass $default_fastcgi_pass;

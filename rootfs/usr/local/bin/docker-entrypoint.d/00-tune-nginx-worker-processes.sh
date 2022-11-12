@@ -4,7 +4,6 @@ set -eu
 
 LC_ALL=C
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-NGINX_CONFIG_FILE=/etc/nginx/nginx.conf
 
 ceildiv() {
   num=$1
@@ -181,4 +180,5 @@ ncpu=$(printf "%s\n%s\n%s\n%s\n%s\n" \
   sort -n |
   head -n 1)
 
-sed -i "s/<nginx_worker_processes>/${ncpu}/g" "$NGINX_CONFIG_FILE"
+export NGINX_WORKER_PROCESSES=${ncpu}
+exec sh -l;
