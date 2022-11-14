@@ -50,7 +50,7 @@ WORKDIR /var/www
 
 EXPOSE 80
 
-CMD ["supervisord", "-c", "/usr/local/etc/supervisor/supervisor.conf", "--nodaemon"]
+CMD ["supervisord", "-c", "/etc/supervisor/supervisor.conf", "--nodaemon"]
 
 ### DEBUG ###
 FROM base as debug
