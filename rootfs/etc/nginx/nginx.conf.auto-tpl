@@ -5,6 +5,8 @@ worker_rlimit_nofile 8192;
 error_log /var/log/nginx/error.log warn;
 pid /var/run/nginx.pid;
 
+pcre_jit $NGINX_PCRE_JIT;
+
 include /etc/nginx/modules/*.conf;
 
 events {
@@ -44,10 +46,20 @@ http {
                text/xml application/xml application/xml+rss image/svg+xml
                application/vnd.ms-fontobject application/x-font-ttf font/opentype;
 
+    fastcgi_temp_path $NGINX_FASTCGI_TMP_DIR;
+
     fastcgi_buffering on;
     fastcgi_buffers 32 4k;
     fastcgi_buffer_size 32k;
     fastcgi_busy_buffers_size 32k;
+
+    fastcgi_cache off;
+    fastcgi_cache_lock on;
+    fastcgi_cache_background_update on;
+    fastcgi_cache_path $NGINX_CACHE_DIR/php levels=1:2 keys_zone=php:10m max_size=$NGINX_CACHE_MAX_SIZE inactive=$NGINX_CACHE_INACTIVE;
+    fastcgi_cache_key "$scheme$request_method$host$request_uri";
+    fastcgi_cache_use_stale error timeout invalid_header http_500;
+    fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 
     include /etc/nginx/servers/*.conf;
 
@@ -73,19 +85,19 @@ http {
             deny all;
         }
 
-        include  /etc/nginx/server-default/*.conf;
-
         location ~ ^/healthcheck-ping$ {
             allow 127.0.0.1;
             deny all;
             access_log off;
-            include /etc/nginx/fastcgi_params;
+            include fastcgi_params;
             fastcgi_read_timeout 5s;
             fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
             fastcgi_pass $default_fastcgi_pass;
         }
 
-       location ~ \.php$ {
+        include  /etc/nginx/server-default/*.conf;
+
+        location ~ \.php$ {
             return 404;
         }
     }

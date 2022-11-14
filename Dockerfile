@@ -14,7 +14,12 @@ ENV USER=${USER} \
     FPM_PM_MAX_REQUESTS=3 \
     NGINX_WORKER_PROCESSES=auto \
     NGINX_WORKER_CONNECTIONS=4096 \
-    NGINX_KEEPALIVE_TIMEOUT=65
+    NGINX_KEEPALIVE_TIMEOUT=65 \
+    NGINX_PCRE_JIT=on \
+    NGINX_FASTCGI_TMP_DIR=/var/run/fastcgi-cache/ \
+    NGINX_CACHE_DIR=/var/run/nginx-cache/ \
+    NGINX_CACHE_MAX_SIZE=6144m \
+    NGINX_CACHE_INACTIVE=1w
 
 # Install deps
 RUN apk add --update --no-cache \
@@ -48,6 +53,7 @@ ENTRYPOINT ["entrypoint.sh"]
 
 WORKDIR /var/www
 
+VOLUME /var/lib/nginx/tmp
 EXPOSE 80
 
 CMD ["supervisord", "-c", "/etc/supervisor/supervisor.conf", "--nodaemon"]
@@ -56,7 +62,8 @@ CMD ["supervisord", "-c", "/etc/supervisor/supervisor.conf", "--nodaemon"]
 FROM base as debug
 ENV APP_ENV=dev \
     APP_DEBUG=true \
-    XDEBUG_MODE=debug
+    XDEBUG_MODE=debug \
+    NGINX_PCRE_JIT=off
 RUN install-php-extensions \
       xdebug
 COPY ./rootfs.debug /
