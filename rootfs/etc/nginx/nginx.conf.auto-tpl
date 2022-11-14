@@ -60,10 +60,17 @@ http {
         add_header X-XSS-Protection "1; mode=block; report=/xss/report" always;
         add_header X-Content-Type-Options "nosniff" always;
 
-        location ~ /\. {
-            deny all;
+        location ~* .(js|css|svg|svgz|ttf|jpg|jpeg|gif|png|ico|mp4|eot|otf|woff|woff2)$ {
             access_log off;
             log_not_found off;
+            expires max;
+            add_header Cache-Control "public, no-transform";
+        }
+
+        location ~ /\. {
+            access_log off;
+            log_not_found off;
+            deny all;
         }
 
         include  /etc/nginx/server-default/*.conf;
@@ -76,6 +83,10 @@ http {
             fastcgi_read_timeout 5s;
             fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
             fastcgi_pass $default_fastcgi_pass;
+        }
+
+       location ~ \.php$ {
+            return 404;
         }
     }
 }
