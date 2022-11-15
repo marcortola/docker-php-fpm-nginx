@@ -56,7 +56,7 @@ WORKDIR /var/www
 VOLUME /var/lib/nginx/tmp
 EXPOSE 80
 
-CMD ["supervisord", "-c", "/etc/supervisor/supervisor.conf", "--nodaemon"]
+CMD ["supervisord", "-c", "/etc/supervisord.conf", "--nodaemon"]
 
 ### DEBUG ###
 FROM base as debug
