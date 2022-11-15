@@ -5,7 +5,7 @@ FROM php:${PHP_VERSION}-fpm-alpine as base
 ARG USER=www-data
 ENV USER=${USER} \
     APP_ENV=prod \
-    APP_DEBUG=false \
+    APP_DEBUG=0 \
     FPM_PM_MAX_CHILDREN=20 \
     FPM_PM_START_SERVERS=2 \
     FPM_PM_MIN_SPARE_SERVERS=1 \
@@ -61,7 +61,7 @@ CMD ["supervisord", "-c", "/etc/supervisord.conf", "--nodaemon"]
 ### DEBUG ###
 FROM base as debug
 ENV APP_ENV=dev \
-    APP_DEBUG=true \
+    APP_DEBUG=1 \
     XDEBUG_MODE=debug \
     NGINX_PCRE_JIT=off
 RUN install-php-extensions \
