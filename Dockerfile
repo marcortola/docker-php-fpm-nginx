@@ -35,8 +35,8 @@ RUN install-php-extensions \
     && mkdir -p /var/run/php/
 
 # Setup Nginx
-RUN chown -R $USER:$USER /var/www/html/ \
-    && rm -rf /usr/share/doc/* /var/www/html/* \
+RUN chown -R $USER:$USER /var/www/ \
+    && rm -rf /usr/share/doc/* /var/www/html /var/www/localhost \
     && rm -f /etc/nginx/sites-enabled/* \
     && mkdir -p /etc/nginx/server-blocks/ \
     && mkdir -p /etc/nginx/site-default/ \
