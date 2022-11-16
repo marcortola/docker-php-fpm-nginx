@@ -41,7 +41,8 @@ RUN chown -R $USER:$USER /var/www/ \
     && mkdir -p /etc/nginx/server-blocks/ \
     && mkdir -p /etc/nginx/site-default/ \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
-	&& ln -sf /dev/stderr /var/log/nginx/error.log
+	&& ln -sf /dev/stderr /var/log/nginx/error.log \
+	&& ln -sf /dev/stderr /var/log/php-fpm.log
 
 # Copy files
 COPY ./rootfs /
