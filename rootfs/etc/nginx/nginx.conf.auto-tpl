@@ -19,6 +19,16 @@ http {
       default "unix:/var/run/php/php-fpm.sock";
     }
 
+    map $http_x_forwarded_proto $proxy_x_forwarded_proto {
+         default $http_x_forwarded_proto;
+         ''      $scheme;
+    }
+
+    map $http_x_forwarded_proto $fcgi_https {
+        default off;
+        https on;
+    }
+
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
@@ -73,6 +83,8 @@ http {
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header X-XSS-Protection "1; mode=block; report=/xss/report" always;
         add_header X-Content-Type-Options "nosniff" always;
+
+        proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
 
         location ~* .(js|css|svg|svgz|ttf|jpg|jpeg|gif|png|ico|mp4|eot|otf|woff|woff2)$ {
             access_log off;
