@@ -86,7 +86,7 @@ http {
 
         proxy_set_header X-Forwarded-Proto $proxy_x_forwarded_proto;
 
-        location ~* .(js|css|svg|svgz|ttf|jpg|jpeg|gif|png|ico|mp4|eot|otf|woff|woff2)$ {
+        location ~* .(js|css|svg|svgz|ttf|jpg|jpeg|gif|png|webp|ico|webm|mp4|eot|otf|woff|woff2)$ {
             access_log off;
             log_not_found off;
             expires max;
