@@ -1,10 +1,7 @@
 [global]
 daemonize = no
-process_control_timeout = 20
-
 error_log = /dev/stderr
-log_level = warning
-log_limit = 8192
+process_control_timeout = 20
 
 [www]
 listen = /var/run/php/php-fpm.sock
