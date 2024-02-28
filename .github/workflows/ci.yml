@@ -16,7 +16,7 @@ jobs:
       max-parallel: 1
       matrix:
         target: [ base, debug ]
-        php: [ 7.4, 8.1 ]
+        php: [ 7.4, 8.1, 8.2 ]
 
     steps:
       - name: Checkout
