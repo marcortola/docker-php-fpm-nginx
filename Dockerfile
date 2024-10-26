@@ -48,8 +48,6 @@ RUN chown -R $USER:$USER /var/www/ \
 COPY ./rootfs /
 RUN find /usr/local/bin/ -type f -name "*.sh" -exec chmod +x {} \;
 
-HEALTHCHECK --start-period=60s --interval=30s --timeout=30s CMD ["healthcheck.sh"]
-
 ENTRYPOINT ["entrypoint.sh"]
 
 WORKDIR /var/www
