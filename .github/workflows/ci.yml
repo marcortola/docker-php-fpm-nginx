@@ -22,6 +22,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Single-arch (host = amd64) so the image can be --load'ed and health-checked below.
       - name: Build
         uses: docker/build-push-action@v3
         with:
@@ -71,5 +78,6 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           build-args: PHP_VERSION=${{ matrix.php }}
+          platforms: linux/amd64,linux/arm64
           tags: marcortola/php-fpm-nginx:${{ matrix.php }}${{ (matrix.target != 'base' && format('-{0}', matrix.target)) || '' }}
           push: true
