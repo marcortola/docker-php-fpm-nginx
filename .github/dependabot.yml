@@ -13,38 +13,11 @@ updates:
     directory: /
     cooldown:
       default-days: 7
-      semver-minor-days: 7
-      semver-patch-days: 3
     ignore:
       - dependency-name: "*"
         update-types:
           - version-update:semver-major
-    groups:
-      security-updates:
-        applies-to: security-updates
-        patterns:
-          - "*"
-        update-types:
-          - patch
-          - minor
-    patterns:
-      - "*"
-    multi-ecosystem-group: repository-dependencies
-    allow:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-patch
           - version-update:semver-minor
-  - package-ecosystem: docker-compose
-    directory: /
-    cooldown:
-      default-days: 7
-      semver-minor-days: 7
-      semver-patch-days: 3
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-major
     groups:
       security-updates:
         applies-to: security-updates
@@ -65,8 +38,6 @@ updates:
     directory: /
     cooldown:
       default-days: 7
-      semver-minor-days: 7
-      semver-patch-days: 3
     ignore:
       - dependency-name: "*"
         update-types:
