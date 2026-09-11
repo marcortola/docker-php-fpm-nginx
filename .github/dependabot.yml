@@ -26,6 +26,11 @@ updates:
     patterns:
       - "*"
     multi-ecosystem-group: repository-dependencies
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
   - package-ecosystem: docker-compose
     directory: /
     ignore:
@@ -43,6 +48,11 @@ updates:
     patterns:
       - "*"
     multi-ecosystem-group: repository-dependencies
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
   - package-ecosystem: github-actions
     directory: /
     ignore:
@@ -60,3 +70,8 @@ updates:
     patterns:
       - "*"
     multi-ecosystem-group: repository-dependencies
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
