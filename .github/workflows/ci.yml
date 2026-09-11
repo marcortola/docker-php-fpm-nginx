@@ -30,7 +30,7 @@ jobs:
 
       # Single-arch (host = amd64) so the image can be --load'ed and health-checked below.
       - name: Build
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: ${{ matrix.target }}
@@ -73,7 +73,7 @@ jobs:
 
       - name: Build and push
         if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: ${{ matrix.target }}
