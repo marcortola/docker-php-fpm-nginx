@@ -81,3 +81,17 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: marcortola/php-fpm-nginx:${{ matrix.php }}${{ (matrix.target != 'base' && format('-{0}', matrix.target)) || '' }}
           push: true
+
+  # Aggregates the matrix above into one check with a stable name. The individual legs are
+  # named "Test MAIN (base, 8.5)" and so on, so they expand and rename whenever the matrix
+  # changes and cannot be listed as required status checks on the branch. This job can.
+  ci-complete:
+    needs: test_main
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every matrix leg succeeded
+        if: needs.test_main.result != 'success'
+        run: |
+          echo "test_main concluded: ${{ needs.test_main.result }}"
+          exit 1
