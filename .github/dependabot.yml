@@ -11,32 +11,13 @@ multi-ecosystem-groups:
 updates:
   - package-ecosystem: docker
     directory: /
+    cooldown:
+      default-days: 7
     ignore:
       - dependency-name: "*"
         update-types:
           - version-update:semver-major
-    groups:
-      security-updates:
-        applies-to: security-updates
-        patterns:
-          - "*"
-        update-types:
-          - patch
-          - minor
-    patterns:
-      - "*"
-    multi-ecosystem-group: repository-dependencies
-    allow:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-patch
           - version-update:semver-minor
-  - package-ecosystem: docker-compose
-    directory: /
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-major
     groups:
       security-updates:
         applies-to: security-updates
@@ -55,6 +36,8 @@ updates:
           - version-update:semver-minor
   - package-ecosystem: github-actions
     directory: /
+    cooldown:
+      default-days: 7
     ignore:
       - dependency-name: "*"
         update-types:
