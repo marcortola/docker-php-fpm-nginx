@@ -109,6 +109,10 @@ http {
             log_not_found off;
         }
 
+        # PHP-FPM's own ping endpoint (ping.path in zzzz-docker.conf), answered by the FPM master
+        # process. It proves FPM is accepting connections and nothing more: the request never
+        # reaches application code, so an application that fails to boot still answers "pong".
+        # Use /healthcheck-app below when the check is meant to gate a deployment.
         location ~ ^/healthcheck-ping$ {
             allow 10.0.0.0/8;
             allow 172.16.0.0/12;
@@ -120,6 +124,52 @@ http {
             include fastcgi_params;
             fastcgi_read_timeout 5s;
             fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_pass $default_fastcgi_pass;
+        }
+
+        # A healthcheck that actually boots the application, for deployment gating.
+        #
+        # Neither of the checks that existed before this one can fail on a broken application.
+        # /healthcheck-ping is answered by the FPM master, and the usual alternative - a small
+        # static public/health.php - runs PHP but never loads the framework. On 2026-09-14 a
+        # dependency bump left a Symfony app throwing while building its DI container, so every
+        # single route returned 500; both checks stayed green, the deploy went through, and the
+        # API was down for roughly fourteen hours.
+        #
+        # Two things make this work where naming an application route in the proxy config does
+        # not. First, the request goes straight to the front controller, so container
+        # compilation, bundle boot and routing all have to succeed before a response exists.
+        # Second, HTTPS is forced on: a reverse proxy healthchecks the container over plain HTTP
+        # on an internal network, and an application that redirects http->https answers 301 to
+        # anything reaching the front controller, which proxies read as unhealthy. The
+        # $fcgi_https map above derives that flag from X-Forwarded-Proto, and proxies generally
+        # cannot be told to send extra headers on a healthcheck - kamal-proxy accepts only path,
+        # interval and timeout. Overriding it here is safe because this location is restricted to
+        # private ranges, so only an internal checker can reach it.
+        #
+        # Opt in per application: expose a cheap route at /healthcheck-app that touches no
+        # database, cache or broker - readiness should mean "this build boots", not "every
+        # downstream is up" - then point the proxy healthcheck at this path. Applications that do
+        # not define the route keep their existing check; this location just 404s for them, which
+        # is why adding it changes nothing until an application opts in.
+        location = /healthcheck-app {
+            allow 10.0.0.0/8;
+            allow 172.16.0.0/12;
+            allow 192.168.0.0/16;
+            allow 169.254.0.0/16;
+            allow 127.0.0.1;
+            deny all;
+            access_log off;
+
+            include fastcgi_params;
+            fastcgi_read_timeout 15s;
+
+            fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+            fastcgi_param SCRIPT_NAME /index.php;
+            fastcgi_param DOCUMENT_ROOT $document_root;
+            fastcgi_param HTTPS on;
+            fastcgi_param HTTP_PROXY "";
+
             fastcgi_pass $default_fastcgi_pass;
         }
 
