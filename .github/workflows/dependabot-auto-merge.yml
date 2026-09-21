@@ -228,7 +228,7 @@ jobs:
       - name: Scan base dependencies
         id: scan-base
         continue-on-error: true
-        uses: google/osv-scanner-action/osv-scanner-action@06b2ab4348248b456ee06c9e953637f55e03504f # v2.5.0
+        uses: google/osv-scanner-action/osv-scanner-action@8ac9e5ce44cc7178e0e04229a91bdcc003166e57 # v2.5.0
         with:
           scan-args: |-
             --format=json
@@ -239,7 +239,7 @@ jobs:
       - name: Scan candidate dependencies
         id: scan-candidate
         continue-on-error: true
-        uses: google/osv-scanner-action/osv-scanner-action@06b2ab4348248b456ee06c9e953637f55e03504f # v2.5.0
+        uses: google/osv-scanner-action/osv-scanner-action@8ac9e5ce44cc7178e0e04229a91bdcc003166e57 # v2.5.0
         with:
           scan-args: |-
             --format=json
