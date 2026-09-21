@@ -1,0 +1,51 @@
+name: Dependabot merge after checks
+
+on:
+  workflow_run:
+    workflows: ["CI", "Dependabot delta audit and auto-merge"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Dependabot pull request to reevaluate
+        required: true
+        type: number
+      dry_run:
+        description: Report eligibility without merging
+        default: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: dependabot-merge-${{ github.event.workflow_run.head_branch || format('pr-{0}', inputs.pull_request_number) }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      ((github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'pull_request_target') &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       startsWith(github.event.workflow_run.head_branch, 'dependabot/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      pull-requests: write
+      statuses: read
+    steps:
+      - name: Check out trusted default-branch evaluator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Evaluate current audit and CI once
+        run: node .github/scripts/dependabot-merge.cjs
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_COMMAND_TOKEN || github.token }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

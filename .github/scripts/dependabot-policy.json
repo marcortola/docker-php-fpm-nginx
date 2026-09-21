@@ -1,0 +1,9 @@
+{
+  "workflows": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "name": "CI",
+      "trigger": {}
+    }
+  ]
+}
