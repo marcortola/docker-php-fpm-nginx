@@ -4,6 +4,10 @@ version: 2
 # human to review; nothing merges them automatically. Dependabot raises no security updates
 # for docker, and a GitHub Actions security update, if one appears, waits for a human like
 # every other update.
+#
+# Repository settings this relies on (Settings > Advanced Security > Dependabot): "Dependabot
+# alerts" and "Dependabot security updates" enabled, "Grouped security updates" disabled. This
+# file defines no security group, so that toggle would bundle the fixes into one pull request.
 updates:
   - package-ecosystem: docker
     directory: /
