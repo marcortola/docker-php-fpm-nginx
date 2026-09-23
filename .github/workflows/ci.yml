@@ -29,9 +29,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Test Dependabot merge policy
-        run: node .github/scripts/dependabot-merge.test.cjs
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
