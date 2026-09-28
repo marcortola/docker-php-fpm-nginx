@@ -4,7 +4,6 @@ services:
 
   app_prod:
     image: marcortola/php-fpm-nginx
-    restart: on-failure
     ports:
       - '10000:80'
     volumes:
@@ -13,7 +12,6 @@ services:
 
   app_dev:
     image: marcortola/php-fpm-nginx:debug
-    restart: on-failure
     ports:
       - '10001:80'
     volumes:
