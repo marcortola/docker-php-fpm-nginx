@@ -13,6 +13,8 @@ concurrency:
 env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
 
+# Documentation-only PRs retain successful validation jobs without running toolchains or tests.
+# Dependency, source and workflow edits always run the complete gate.
 jobs:
   test_main:
     name: Test MAIN
@@ -20,7 +22,7 @@ jobs:
 
     strategy:
       fail-fast: true
-      max-parallel: 1
+      max-parallel: 4
       matrix:
         target: [ base, debug ]
         php: [ 7.4, 8.1, 8.2, 8.3, 8.4, 8.5 ]
@@ -28,15 +30,46 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Select validation scope
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" != pull_request ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # checkout uses the synthetic PR merge; its first parent is the target branch.
+          git diff --no-renames --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/ci-changes"
+          run=false
+          changed=false
+          while IFS= read -r -d '' path; do
+            changed=true
+            case "$path" in
+              README.md|AGENTS.md|CLAUDE.md|docs/*.md) ;;
+              *) run=true ;;
+            esac
+          done < "$RUNNER_TEMP/ci-changes"
+          if [ "$changed" = false ]; then run=true; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          if [ "$run" = false ]; then
+            echo 'Documentation-only change; validation check remains successful.'
+          fi
 
       - name: Set up QEMU
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.changes.outputs.run == 'true'
         uses: docker/setup-buildx-action@v3
 
       # Single-arch (host = amd64) so the image can be --load'ed and health-checked below.
       - name: Build
+        if: steps.changes.outputs.run == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -44,8 +77,11 @@ jobs:
           build-args: PHP_VERSION=${{ matrix.php }}
           tags: php-fpm-nginx:ci
           load: true
+          cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
+          cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
       - name: Start Container with Health Check
+        if: steps.changes.outputs.run == 'true'
         run: |
           docker run -d --rm \
             --name test \
@@ -54,9 +90,11 @@ jobs:
             --health-interval=30s \
             --health-timeout=30s \
             --health-start-period=60s \
+            --health-start-interval=1s \
             php-fpm-nginx:ci
 
       - name: Wait for container
+        if: steps.changes.outputs.run == 'true'
         timeout-minutes: 1
         run: |
           while status="$(docker inspect -f '{{ .State.Health.Status }}' test)"; do
@@ -69,6 +107,7 @@ jobs:
           exit 1
 
       - name: Test
+        if: steps.changes.outputs.run == 'true'
         run: curl http://localhost:10000
 
       - name: Login to Docker Hub
@@ -88,6 +127,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: marcortola/php-fpm-nginx:${{ matrix.php }}${{ (matrix.target != 'base' && format('-{0}', matrix.target)) || '' }}
           push: true
+          cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
+          cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
   # Aggregates the matrix above into one check with a stable name. The individual legs are
   # named "Test MAIN (base, 8.5)" and so on, so they expand and rename whenever the matrix
