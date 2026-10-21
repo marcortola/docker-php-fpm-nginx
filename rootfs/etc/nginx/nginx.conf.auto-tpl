@@ -3,7 +3,7 @@ worker_processes $NGINX_WORKER_PROCESSES;
 worker_rlimit_nofile 8192;
 
 error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
+pid $NGINX_PID_FILE;
 
 pcre_jit $NGINX_PCRE_JIT;
 

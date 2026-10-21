@@ -48,6 +48,22 @@ RUN chown -R $USER:$USER /var/www/ \
 COPY ./rootfs /
 RUN find /usr/local/bin/ -type f -name "*.sh" -exec chmod +x {} \;
 
+# Non-root mode (see README.md): a container started as an arbitrary uid with group 0 added
+# can write exactly these paths, and nothing is world-writable. They are the .auto-tpl
+# render targets, the nginx temp directories and the fpm socket directory. Root mode is
+# unaffected: 00-init.sh still creates and chowns its directories at start.
+RUN set -eu; \
+    mkdir -p "$NGINX_CACHE_DIR" "$NGINX_FASTCGI_TMP_DIR"; \
+    for template in $(find /usr/local/etc /etc -type f -name "*.auto-tpl"); do \
+        touch "${template%.auto-tpl}"; \
+        chgrp 0 "${template%.auto-tpl}"; \
+        chmod g=u "${template%.auto-tpl}"; \
+    done; \
+    for dir in /var/lib/nginx /var/lib/nginx/tmp /var/run/php "$NGINX_CACHE_DIR" "$NGINX_FASTCGI_TMP_DIR"; do \
+        chgrp 0 "$dir"; \
+        chmod g=u "$dir"; \
+    done
+
 ENTRYPOINT ["entrypoint.sh"]
 
 WORKDIR /var/www
