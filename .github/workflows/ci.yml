@@ -14,6 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
 
@@ -29,7 +32,7 @@ jobs:
       max-parallel: 4
       matrix:
         target: [ base, debug ]
-        php: [ 7.4, 8.1, 8.2, 8.3, 8.4, 8.5 ]
+        php: [ 8.2, 8.3, 8.4, 8.5 ]
 
     steps:
       - name: Checkout
@@ -81,6 +84,10 @@ jobs:
           build-args: PHP_VERSION=${{ matrix.php }}
           tags: php-fpm-nginx:ci
           load: true
+          # Scheduled and dispatched rebuilds skip the layer cache so apk packages and the
+          # php-extension-installer layers refresh. The push step reuses these amd64 layers from the
+          # builder's local cache and skips the gha cache on the same events (see there).
+          no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
           cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
@@ -291,7 +298,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: marcortola/php-fpm-nginx:${{ matrix.php }}${{ (matrix.target != 'base' && format('-{0}', matrix.target)) || '' }}
           push: true
-          cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
+          # On scheduled and dispatched rebuilds this step does not import the gha cache: amd64 comes
+          # from the builder's local cache, so the published image is the one tested above, and
+          # linux/arm64, which the amd64-only test build never refreshes, is rebuilt fresh on any
+          # branch. Pull requests and pushes keep the gha cache.
+          cache-from: ${{ !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('type=gha,scope=php-{0}-{1}', matrix.php, matrix.target) || '' }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
   # Aggregates the matrix above into one check with a stable name. The individual legs are
@@ -307,3 +318,18 @@ jobs:
         run: |
           echo "test_main concluded: ${{ needs.test_main.result }}"
           exit 1
+
+  # GitHub disables scheduled workflows in public repositories after 60 days without repository
+  # activity. Re-enabling the workflow on every scheduled run keeps the weekly rebuild alive.
+  keepalive:
+    name: Keep schedule enabled
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Re-enable this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh api -X PUT "repos/$REPOSITORY/actions/workflows/ci.yml/enable"

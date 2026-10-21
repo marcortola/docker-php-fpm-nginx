@@ -3,6 +3,13 @@
 PHP-FPM and nginx under supervisord on Alpine, published as `marcortola/php-fpm-nginx:<php>`
 and `marcortola/php-fpm-nginx:<php>-debug` (with Xdebug).
 
+## Tags
+
+`<php>` is one of `8.2`, `8.3`, `8.4` and `8.5`, the PHP branches that still receive upstream
+security fixes. Every tag is rebuilt each Monday at 02:17 UTC from the current
+`php:<php>-fpm-alpine`, so upstream fixes reach the published images without a commit. The `7.4`
+and `8.1` tags remain on Docker Hub but are no longer built, and get no fixes.
+
 ## Non-root mode
 
 By default the container starts as root. supervisord and the nginx and php-fpm masters run as
