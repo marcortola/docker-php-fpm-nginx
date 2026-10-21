@@ -58,7 +58,7 @@ http {
                text/xml application/xml application/xml+rss image/svg+xml
                application/vnd.ms-fontobject application/x-font-ttf font/opentype;
 
-    fastcgi_temp_path $NGINX_FASTCGI_TMP_DIR;
+    ${NGINX_TEMP_PATHS}fastcgi_temp_path $NGINX_FASTCGI_TMP_DIR;
 
     fastcgi_buffering on;
     fastcgi_buffers 32 4k;

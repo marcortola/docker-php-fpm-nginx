@@ -20,6 +20,12 @@ ENV USER=${USER} \
     NGINX_CACHE_DIR=/var/run/nginx-cache/ \
     NGINX_CACHE_MAX_SIZE=6144m \
     NGINX_CACHE_INACTIVE=1w
+# Root-mode values of the template switches for non-root mode (see README.md); entrypoint.sh
+# overrides them when the container runs as another uid. They are set here rather than in the
+# entrypoint so that re-running 20-auto-envsubst.sh by hand renders the same files.
+ENV NGINX_PID_FILE=/var/run/nginx.pid \
+    NGINX_TEMP_PATHS="" \
+    FPM_LISTEN_OWNERSHIP_COMMENT=""
 
 # Install deps
 RUN apk add --update --no-cache \
