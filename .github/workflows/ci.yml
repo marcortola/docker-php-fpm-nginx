@@ -110,6 +110,73 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         run: curl http://localhost:10000
 
+      # Non-root mode, as consumers run their dev containers: an arbitrary uid with group 0
+      # added and the project bind-mounted at /var/www. Reuses the image loaded above.
+      - name: Test non-root mode
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          www="$RUNNER_TEMP/nonroot-www"
+          mkdir -p "$www"
+          cat > "$www/nonroot-test.php" <<'PHP'
+          <?php
+          $body = file_get_contents('php://input');
+          file_put_contents(__DIR__ . '/written-by-php.txt', 'written');
+          header('Content-Type: text/plain');
+          echo $_SERVER['REQUEST_METHOD'] === 'POST' ? strlen($body) . ' ' . md5($body) : 'php-ok';
+          PHP
+          cat > "$RUNNER_TEMP/nonroot-test.conf" <<'NGINX'
+          root /var/www;
+          location = /nonroot-test.php {
+              include fastcgi_params;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_pass $default_fastcgi_pass;
+          }
+          NGINX
+          # The runner user is not uid 1000; hand the mount to the uid the container runs as.
+          sudo chown -R 1000:1000 "$www"
+
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot; docker rm -f test-nonroot > /dev/null; exit "$status"' EXIT
+          docker run -d \
+            --name test-nonroot \
+            --user 1000:1000 \
+            --group-add 0 \
+            -p 10001:80 \
+            -v "$www:/var/www" \
+            -v "$RUNNER_TEMP/nonroot-test.conf:/etc/nginx/server-default/nonroot-test.conf:ro" \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx:ci
+
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+
+          # Every process runs as the requested uid.
+          users="$(docker exec test-nonroot ps -o user= | sort -u)"
+          [ "$users" = 1000 ] || { echo "processes run as: $users"; exit 1; }
+
+          [ "$(curl --silent --fail http://localhost:10001/nonroot-test.php)" = php-ok ]
+
+          # Larger than client_body_buffer_size (16k), so nginx buffers it to /var/lib/nginx/tmp.
+          head -c 524288 /dev/urandom > "$RUNNER_TEMP/nonroot-body"
+          expected="524288 $(md5sum < "$RUNNER_TEMP/nonroot-body" | cut -d' ' -f1)"
+          actual="$(curl --silent --fail --data-binary "@$RUNNER_TEMP/nonroot-body" http://localhost:10001/nonroot-test.php)"
+          [ "$actual" = "$expected" ] || { echo "POST echoed '$actual', expected '$expected'"; exit 1; }
+
+          # Nothing in the bind mount may belong to root or www-data (82).
+          [ -f "$www/written-by-php.txt" ]
+          foreign="$(find "$www" ! -uid 1000)"
+          [ -z "$foreign" ] || { echo "not owned by uid 1000:"; find "$www" ! -uid 1000 -exec ls -lnd {} +; exit 1; }
+
       - name: Login to Docker Hub
         if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
