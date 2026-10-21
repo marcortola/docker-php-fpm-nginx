@@ -7,25 +7,13 @@ if [ "$1" = "supervisord" ]; then
   # Non-root mode: the container was started as an arbitrary uid, typically the host uid
   # with group 0 added (compose `user:` plus `group_add: ["0"]`). Nothing can be chowned,
   # and only the paths the Dockerfile prepares with group 0 and g=u are writable, so the
-  # root-only init script is skipped and the runtime files move to /tmp. The variables below
-  # feed the .auto-tpl templates; the Dockerfile sets their root-mode values.
+  # root-only init script is skipped and supervisord gets its non-root config.
+  # docker-entrypoint.d/20-auto-envsubst.sh moves the nginx and php-fpm runtime files to /tmp
+  # itself, so that running it again by hand renders the same files.
   if [ "$(id -u)" = "0" ]; then
     nonroot=false
   else
     nonroot=true
-    export NGINX_PID_FILE=/tmp/nginx.pid
-    # A non-root fpm master cannot chown its socket (EPERM), so the lines become comments;
-    # listen.mode = 0666 still lets nginx connect.
-    export FPM_LISTEN_OWNERSHIP_COMMENT=';'
-    # nginx's compiled-in temp paths are under /var/lib/nginx/tmp, an anonymous volume. One
-    # kept from a root-mode run is owned by www-data with mode 755, and request bodies that
-    # spill to disk would fail there, so nginx creates its temp directories in /tmp/nginx.
-    mkdir -p /tmp/nginx
-    export NGINX_TEMP_PATHS='client_body_temp_path /tmp/nginx/client_body;
-    proxy_temp_path /tmp/nginx/proxy;
-    uwsgi_temp_path /tmp/nginx/uwsgi;
-    scgi_temp_path /tmp/nginx/scgi;
-    '
 
     # supervisord.conf runs as user=root and keeps its pidfile and socket in /var/run; the
     # non-root variant has the same programs with its runtime files under /tmp. A command

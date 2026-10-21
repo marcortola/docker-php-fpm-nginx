@@ -71,7 +71,10 @@ The entrypoint detects the mode from `id -u`. When the uid is not 0:
 - php-fpm does not chown its socket: `listen.owner` and `listen.group` are commented out, and
   `listen.mode = 0666` lets nginx connect.
 
-Root mode renders the same configuration and behaves as before.
+Root mode renders the same configuration and behaves as before. The nginx and php-fpm changes
+come from `docker-entrypoint.d/20-auto-envsubst.sh`, which checks the uid itself, so running it
+again by hand with `docker exec` and then restarting the programs with `supervisorctl` is safe
+in both modes.
 
 These paths have group 0 with group permissions equal to the owner's, so group 0 can write them.
 Nothing is world-writable:
