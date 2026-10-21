@@ -151,6 +151,8 @@ jobs:
           cat > "$RUNNER_TEMP/nonroot-test.conf" <<'NGINX'
           root /var/www;
           location = /nonroot-test.php {
+              # Logs the temp file nginx buffers each spilled body to, checked below.
+              error_log /dev/stderr warn;
               include fastcgi_params;
               fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               fastcgi_pass $default_fastcgi_pass;
@@ -191,6 +193,37 @@ jobs:
           users="$(docker exec test-nonroot ps -o user= | sort -u)"
           [ "$users" = 1000 ] || { echo "processes run as: $users"; exit 1; }
 
+          # Non-root mode renders the pid and nginx's temp paths under /tmp, the fastcgi temp
+          # path as in root mode, and no chown of the fpm socket. Rendering again by hand,
+          # outside the entrypoint, must give the same lines, and nginx and php-fpm must
+          # restart with them; the requests below then run on the restarted programs.
+          check_nonroot_render() {
+            for line in 'pid /tmp/nginx.pid;' \
+              '    client_body_temp_path /tmp/nginx/client_body;' \
+              '    proxy_temp_path /tmp/nginx/proxy;' \
+              '    uwsgi_temp_path /tmp/nginx/uwsgi;' \
+              '    scgi_temp_path /tmp/nginx/scgi;' \
+              '    fastcgi_temp_path /var/run/fastcgi-cache/;'; do
+              docker exec test-nonroot grep -qxF "$line" /etc/nginx/nginx.conf || { echo "nginx.conf lacks '$line'"; exit 1; }
+            done
+            if docker exec test-nonroot grep -E '^ *listen\.(owner|group)' /usr/local/etc/php-fpm.d/zzzz-docker.conf; then
+              echo 'zzzz-docker.conf chowns the fpm socket'; exit 1
+            fi
+          }
+          check_nonroot_render
+          docker exec test-nonroot /usr/local/bin/docker-entrypoint.d/20-auto-envsubst.sh
+          check_nonroot_render
+          for program in nginx php-fpm; do
+            restarted="$(docker exec test-nonroot supervisorctl -c /etc/supervisord-nonroot.conf restart "$program")"
+            [ "$restarted" = "$(printf '%s: stopped\n%s: started' "$program" "$program")" ] || { echo "restarting $program: $restarted"; exit 1; }
+          done
+          healthy=false
+          for _ in $(seq 30); do
+            if docker exec test-nonroot /usr/local/bin/healthcheck.sh > /dev/null; then healthy=true; break; fi
+            sleep 1
+          done
+          [ "$healthy" = true ] || { echo 'the health check fails after the restart'; exit 1; }
+
           [ "$(curl --silent --fail http://localhost:10001/nonroot-test.php)" = php-ok ]
 
           # The 512 KiB body is larger than client_body_buffer_size (16k), so nginx buffers it to
@@ -206,6 +239,13 @@ jobs:
           expected="$(for _ in $(seq 16); do cat "$RUNNER_TEMP/nonroot-body"; done | md5sum)"
           actual="$(md5sum < "$RUNNER_TEMP/nonroot-echo")"
           [ "$actual" = "$expected" ] || { echo "POST echo has md5 $actual, expected $expected"; exit 1; }
+          # Both bodies did spill, to the non-root temp paths: a matching echo alone does not
+          # show it, since socket buffers can absorb the response.
+          logs="$(docker logs test-nonroot 2>&1)"
+          for message in 'a client request body is buffered to a temporary file /tmp/nginx/client_body/' \
+            'an upstream response is buffered to a temporary file /var/run/fastcgi-cache/'; do
+            grep -qF "$message" <<< "$logs" || { echo "nginx did not log '$message'"; exit 1; }
+          done
 
           # The bind mount holds only the test page and the file PHP wrote, and nothing in it
           # belongs to root or www-data (82).
