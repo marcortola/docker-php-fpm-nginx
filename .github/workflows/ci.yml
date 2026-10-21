@@ -14,6 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
 
@@ -29,7 +32,7 @@ jobs:
       max-parallel: 4
       matrix:
         target: [ base, debug ]
-        php: [ 7.4, 8.1, 8.2, 8.3, 8.4, 8.5 ]
+        php: [ 8.2, 8.3, 8.4, 8.5 ]
 
     steps:
       - name: Checkout
@@ -81,6 +84,10 @@ jobs:
           build-args: PHP_VERSION=${{ matrix.php }}
           tags: php-fpm-nginx:ci
           load: true
+          # Scheduled and dispatched rebuilds skip the layer cache so apk packages and the
+          # php-extension-installer layers refresh. The push step cannot simply reuse these fresh
+          # layers, because it also builds arm64; it skips the cache on the same events (see there).
+          no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
           cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
@@ -131,6 +138,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: marcortola/php-fpm-nginx:${{ matrix.php }}${{ (matrix.target != 'base' && format('-{0}', matrix.target)) || '' }}
           push: true
+          # The test build above is amd64 only, so it never refreshes the linux/arm64 layers built
+          # here; with the cache they would come from an earlier run and keep stale apk packages.
+          # Skipping the cache on the same events rebuilds arm64 too; amd64 is then rebuilt from the
+          # same inputs minutes after the tested image. Pull requests and pushes keep the cache.
+          no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
           cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
@@ -147,3 +159,18 @@ jobs:
         run: |
           echo "test_main concluded: ${{ needs.test_main.result }}"
           exit 1
+
+  # GitHub disables scheduled workflows in public repositories after 60 days without repository
+  # activity. Re-enabling the workflow on every scheduled run keeps the weekly rebuild alive.
+  keepalive:
+    name: Keep schedule enabled
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Re-enable this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh api -X PUT "repos/$REPOSITORY/actions/workflows/ci.yml/enable"
