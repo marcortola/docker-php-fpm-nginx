@@ -85,8 +85,8 @@ jobs:
           tags: php-fpm-nginx:ci
           load: true
           # Scheduled and dispatched rebuilds skip the layer cache so apk packages and the
-          # php-extension-installer layers refresh. The push step cannot simply reuse these fresh
-          # layers, because it also builds arm64; it skips the cache on the same events (see there).
+          # php-extension-installer layers refresh. The push step reuses these amd64 layers from the
+          # builder's local cache and skips the gha cache on the same events (see there).
           no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
           cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
@@ -138,12 +138,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: marcortola/php-fpm-nginx:${{ matrix.php }}${{ (matrix.target != 'base' && format('-{0}', matrix.target)) || '' }}
           push: true
-          # The test build above is amd64 only, so it never refreshes the linux/arm64 layers built
-          # here; with the cache they would come from an earlier run and keep stale apk packages.
-          # Skipping the cache on the same events rebuilds arm64 too; amd64 is then rebuilt from the
-          # same inputs minutes after the tested image. Pull requests and pushes keep the cache.
-          no-cache: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-          cache-from: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }}
+          # On scheduled and dispatched rebuilds this step does not import the gha cache: amd64 comes
+          # from the builder's local cache, so the published image is the one tested above, and
+          # linux/arm64, which the amd64-only test build never refreshes, is rebuilt fresh on any
+          # branch. Pull requests and pushes keep the gha cache.
+          cache-from: ${{ !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('type=gha,scope=php-{0}-{1}', matrix.php, matrix.target) || '' }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
   # Aggregates the matrix above into one check with a stable name. The individual legs are
