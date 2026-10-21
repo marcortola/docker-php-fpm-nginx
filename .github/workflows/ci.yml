@@ -112,7 +112,167 @@ jobs:
 
       - name: Test
         if: steps.changes.outputs.run == 'true'
-        run: curl http://localhost:10000
+        run: |
+          curl http://localhost:10000
+
+          # Root mode renders the non-root switches as before: the pid under /var/run, the fpm
+          # socket chowned to www-data and nginx's compiled-in temp paths. Rendering again by
+          # hand, outside the entrypoint, must give the same lines.
+          check_root_render() {
+            for line in 'pid /var/run/nginx.pid;' '    fastcgi_temp_path /var/run/fastcgi-cache/;'; do
+              docker exec test grep -qxF "$line" /etc/nginx/nginx.conf || { echo "nginx.conf lacks '$line'"; exit 1; }
+            done
+            if docker exec test grep -E '^ *(client_body|proxy|uwsgi|scgi)_temp_path' /etc/nginx/nginx.conf; then
+              echo 'nginx.conf overrides a compiled-in temp path'; exit 1
+            fi
+            for line in 'listen.owner = www-data' 'listen.group = www-data'; do
+              docker exec test grep -qxF "$line" /usr/local/etc/php-fpm.d/zzzz-docker.conf || { echo "zzzz-docker.conf lacks '$line'"; exit 1; }
+            done
+          }
+          check_root_render
+          docker exec test /usr/local/bin/docker-entrypoint.d/20-auto-envsubst.sh
+          check_root_render
+
+      # Non-root mode, as consumers run their dev containers: an arbitrary uid with group 0
+      # added and the project bind-mounted at /var/www. Reuses the image loaded above.
+      - name: Test non-root mode
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          www="$RUNNER_TEMP/nonroot-www"
+          mkdir -p "$www"
+          cat > "$www/nonroot-test.php" <<'PHP'
+          <?php
+          $body = file_get_contents('php://input');
+          file_put_contents(__DIR__ . '/written-by-php.txt', 'written');
+          header('Content-Type: application/octet-stream');
+          echo $_SERVER['REQUEST_METHOD'] === 'POST' ? str_repeat($body, 16) : 'php-ok';
+          PHP
+          cat > "$RUNNER_TEMP/nonroot-test.conf" <<'NGINX'
+          root /var/www;
+          location = /nonroot-test.php {
+              # Logs the temp file nginx buffers each spilled body to, checked below.
+              error_log /dev/stderr warn;
+              include fastcgi_params;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_pass $default_fastcgi_pass;
+          }
+          NGINX
+          # The runner user is not uid 1000; hand the mount to the uid the container runs as.
+          sudo chown -R 1000:1000 "$www"
+
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-nonroot; docker rm -f test-nonroot > /dev/null; exit "$status"' EXIT
+          # --volumes-from mounts the root container's /var/lib/nginx/tmp volume, which its
+          # 00-init.sh chowned to www-data with mode 755, as a container switched from root to
+          # non-root mode keeps it.
+          docker run -d \
+            --name test-nonroot \
+            --user 1000:1000 \
+            --group-add 0 \
+            -p 10001:80 \
+            --volumes-from test \
+            -v "$www:/var/www" \
+            -v "$RUNNER_TEMP/nonroot-test.conf:/etc/nginx/server-default/nonroot-test.conf:ro" \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx:ci
+
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-nonroot)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+
+          # Every process runs as the requested uid.
+          users="$(docker exec test-nonroot ps -o user= | sort -u)"
+          [ "$users" = 1000 ] || { echo "processes run as: $users"; exit 1; }
+
+          # Non-root mode renders the pid and nginx's temp paths under /tmp, the fastcgi temp
+          # path as in root mode, and no chown of the fpm socket. Rendering again by hand,
+          # outside the entrypoint, must give the same lines, and nginx and php-fpm must
+          # restart with them; the requests below then run on the restarted programs.
+          check_nonroot_render() {
+            for line in 'pid /tmp/nginx.pid;' \
+              '    client_body_temp_path /tmp/nginx/client_body;' \
+              '    proxy_temp_path /tmp/nginx/proxy;' \
+              '    uwsgi_temp_path /tmp/nginx/uwsgi;' \
+              '    scgi_temp_path /tmp/nginx/scgi;' \
+              '    fastcgi_temp_path /var/run/fastcgi-cache/;'; do
+              docker exec test-nonroot grep -qxF "$line" /etc/nginx/nginx.conf || { echo "nginx.conf lacks '$line'"; exit 1; }
+            done
+            if docker exec test-nonroot grep -E '^ *listen\.(owner|group)' /usr/local/etc/php-fpm.d/zzzz-docker.conf; then
+              echo 'zzzz-docker.conf chowns the fpm socket'; exit 1
+            fi
+          }
+          check_nonroot_render
+          docker exec test-nonroot /usr/local/bin/docker-entrypoint.d/20-auto-envsubst.sh
+          check_nonroot_render
+          for program in nginx php-fpm; do
+            restarted="$(docker exec test-nonroot supervisorctl -c /etc/supervisord-nonroot.conf restart "$program")"
+            [ "$restarted" = "$(printf '%s: stopped\n%s: started' "$program" "$program")" ] || { echo "restarting $program: $restarted"; exit 1; }
+          done
+          healthy=false
+          for _ in $(seq 30); do
+            if docker exec test-nonroot /usr/local/bin/healthcheck.sh > /dev/null; then healthy=true; break; fi
+            sleep 1
+          done
+          [ "$healthy" = true ] || { echo 'the health check fails after the restart'; exit 1; }
+
+          [ "$(curl --silent --fail http://localhost:10001/nonroot-test.php)" = php-ok ]
+
+          # The 512 KiB body is larger than client_body_buffer_size (16k), so nginx buffers it to
+          # a temp file. PHP echoes it 16 times; the socket buffers on the way to curl absorb a
+          # 512 KiB response, but 8 MiB read at 2 MB/s fills the fastcgi buffers, so nginx also
+          # buffers the response to $NGINX_FASTCGI_TMP_DIR.
+          head -c 524288 /dev/urandom > "$RUNNER_TEMP/nonroot-body"
+          curl --silent --fail --limit-rate 2M \
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary "@$RUNNER_TEMP/nonroot-body" \
+            -o "$RUNNER_TEMP/nonroot-echo" \
+            http://localhost:10001/nonroot-test.php
+          expected="$(for _ in $(seq 16); do cat "$RUNNER_TEMP/nonroot-body"; done | md5sum)"
+          actual="$(md5sum < "$RUNNER_TEMP/nonroot-echo")"
+          [ "$actual" = "$expected" ] || { echo "POST echo has md5 $actual, expected $expected"; exit 1; }
+          # Both bodies did spill, to the non-root temp paths: a matching echo alone does not
+          # show it, since socket buffers can absorb the response.
+          logs="$(docker logs test-nonroot 2>&1)"
+          for message in 'a client request body is buffered to a temporary file /tmp/nginx/client_body/' \
+            'an upstream response is buffered to a temporary file /var/run/fastcgi-cache/'; do
+            grep -qF "$message" <<< "$logs" || { echo "nginx did not log '$message'"; exit 1; }
+          done
+
+          # The bind mount holds only the test page and the file PHP wrote, and nothing in it
+          # belongs to root or www-data (82).
+          files="$(find "$www" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')"
+          [ "$files" = 'nonroot-test.php written-by-php.txt ' ] || { echo "bind mount holds: $files"; exit 1; }
+          foreign="$(find "$www" ! -uid 1000)"
+          [ -z "$foreign" ] || { echo "not owned by uid 1000:"; find "$www" ! -uid 1000 -exec ls -lnd {} +; exit 1; }
+
+          # The entrypoint swaps /etc/supervisord.conf for the non-root config in each spelling
+          # of -c, and only in non-root mode. A stub supervisord earlier in PATH prints the
+          # arguments it receives.
+          printf '#!/bin/sh\necho "$*"\n' > "$RUNNER_TEMP/print-args"
+          chmod 755 "$RUNNER_TEMP/print-args"
+          check_args() { # user, expected arguments, command
+            user=$1 expected=$2
+            shift 2
+            actual="$(docker run --rm --user "$user" --group-add 0 \
+              -v "$RUNNER_TEMP/print-args:/usr/local/sbin/supervisord:ro" \
+              php-fpm-nginx:ci "$@" | tail -n 1)"
+            [ "$actual" = "$expected" ] || { echo "as $user, '$*' ran supervisord $actual, expected $expected"; exit 1; }
+          }
+          check_args 1000:1000 '-c /etc/supervisord-nonroot.conf --nodaemon' supervisord -c /etc/supervisord.conf --nodaemon
+          check_args 1000:1000 '--configuration /etc/supervisord-nonroot.conf' supervisord --configuration /etc/supervisord.conf
+          check_args 1000:1000 '-c/etc/supervisord-nonroot.conf' supervisord -c/etc/supervisord.conf
+          check_args 1000:1000 '--configuration=/etc/supervisord-nonroot.conf' supervisord --configuration=/etc/supervisord.conf
+          check_args 1000:1000 '-c /var/www/custom.conf' supervisord -c /var/www/custom.conf
+          check_args 0:0 '-c /etc/supervisord.conf --nodaemon' supervisord -c /etc/supervisord.conf --nodaemon
 
       - name: Login to Docker Hub
         if: ${{ github.event_name != 'pull_request' }}

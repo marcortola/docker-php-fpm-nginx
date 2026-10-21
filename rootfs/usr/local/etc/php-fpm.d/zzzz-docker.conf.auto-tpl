@@ -7,8 +7,8 @@ log_level = warning
 [www]
 listen = /var/run/php/php-fpm.sock
 listen.mode = 0666
-listen.owner = $USER
-listen.group = $USER
+${FPM_LISTEN_OWNERSHIP_COMMENT}listen.owner = $USER
+${FPM_LISTEN_OWNERSHIP_COMMENT}listen.group = $USER
 
 ping.path = /healthcheck-ping
 access.log = /dev/null
