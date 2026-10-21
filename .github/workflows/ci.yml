@@ -8,7 +8,7 @@ on:
   # Weekly rebuild so published tags pick up upstream php:*-fpm-alpine security releases
   # without waiting for a commit.
   schedule:
-    - cron: '0 4 * * 1'
+    - cron: '17 2 * * 1'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
