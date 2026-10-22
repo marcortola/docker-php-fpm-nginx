@@ -3,7 +3,7 @@
 # workflow so that .github/scripts/tests/run.sh can drive it against fixtures: every network
 # access goes through gh, curl or docker, which the tests replace with stubs on PATH.
 #
-# Usage: security-watch.sh decide|report|alert
+# Usage: security-watch.sh decide|report|alert|recover
 #
 #   decide  Collects PHP and Alpine package findings, drops those a security-watch issue
 #           already records, rebuilds every tag through ci.yml for the rest, waits for the run
@@ -14,6 +14,8 @@
 #           no issue records yet, verifying Alpine package fixes against the Trivy reports in
 #           $RESCAN_DIR.
 #   alert   Opens or comments on the "Security watch failing" issue.
+#   recover Comments on and closes the open "Security watch failing" issues this workflow
+#           opened, once a run passes again.
 #
 # Environment: REPOSITORY (owner/name), STATE_DIR, SCAN_DIR (decide), RESCAN_DIR (report, when
 # the decision has Alpine findings and a successful rebuild), WATCH_RUN_URL, DRY_RUN
@@ -35,6 +37,7 @@ readonly SERVER_URL=${GITHUB_SERVER_URL:-https://github.com}
 # The author of everything this workflow writes with GITHUB_TOKEN. Anyone can comment on a
 # public issue, so a marker any other account wrote must not silence a finding.
 readonly BOT_LOGIN='github-actions[bot]'
+readonly ALERT_TITLE='Security watch failing'
 
 log() { printf '%s\n' "$*" >&2; }
 die() { log "error: $*"; exit 1; }
@@ -244,15 +247,21 @@ load_records() {
 }
 
 # Fingerprints the records hold, so a finding any issue records is never acted on again.
+#
+# The bodies also quote external text (php.net release data, Trivy findings), so a marker counts
+# only as a whole line in the exact form render_body_jq writes, and the render keeps external
+# text from starting a line. A line may end in a carriage return: editing a body in the web
+# interface stores it with CRLF line endings.
 known_fingerprints() {
-	jq '[.[] | scan("<!-- security-watch:fingerprint=([0-9a-f]{16}) -->")[0]] | unique' \
+	jq '[.[] | scan("(?m)^<!-- security-watch:fingerprint=([0-9a-f]{16}) -->\r?$")[0]] | unique' \
 		"$STATE_DIR/records.json"
 }
 
-# The highest version each PHP branch has been notified up to, such as {"8.5": "8.5.12"}.
+# The highest version each PHP branch has been notified up to, such as {"8.5": "8.5.12"}. Like
+# fingerprints, notices count only as whole lines.
 notified_versions() {
 	jq 'def v: split(".") | map(tonumber);
-		[.[] | scan("<!-- security-watch:php-notified=([0-9]+\\.[0-9]+):([0-9]+\\.[0-9]+\\.[0-9]+) -->")
+		[.[] | scan("(?m)^<!-- security-watch:php-notified=([0-9]+\\.[0-9]+):([0-9]+\\.[0-9]+\\.[0-9]+) -->\r?$")
 			| select(.[0] as $php | .[1] | startswith($php + "."))]
 		| group_by(.[0]) | map({key: .[0][0], value: (map(.[1]) | max_by(v))}) | from_entries' \
 		"$STATE_DIR/records.json"
@@ -548,9 +557,13 @@ cmd_report() {
 			log "An issue already records every finding of '$title'; skipping."
 			continue
 		fi
+		# The findings quote php.net and Trivy text. Inert, it can neither start a line, where it
+		# could pass for a marker (see known_fingerprints), nor open an HTML comment that hides
+		# the rest of the body from its reader.
 		body=$(jq -r --arg title "$title" --arg image "$IMAGE" '
+			def inert: gsub("[[:cntrl:]]"; " ") | gsub("<!--"; "&lt;!--");
 			.rebuild as $rebuild | .watch_run_url as $watch
-			| [.findings[] | select(.issue == $title)] as $group
+			| [.findings[] | select(.issue == $title) | walk(if type == "string" then inert else . end)] as $group
 			| '"$render_body_jq" <<< "$decision")
 		post "$title" "$body"
 	done < <(jq -r '[.findings[].issue] | unique | .[]' <<< "$decision")
@@ -558,7 +571,7 @@ cmd_report() {
 
 cmd_alert() {
 	require REPOSITORY WATCH_RUN_URL
-	local title='Security watch failing' body
+	local title=$ALERT_TITLE body
 	body="The security watch failed: $WATCH_RUN_URL
 
 Until it passes again, new PHP security releases and Alpine package fixes are neither detected nor rebuilt.
@@ -572,9 +585,35 @@ The watch may have dispatched a rebuild before it failed. Check the ci.yml runs 
 	post "$title" "$body"
 }
 
+# A failure issue that stays open after the watch recovers reads as an ongoing outage. Only the
+# workflow's own issues count: one that someone else opened under this title is theirs to close.
+cmd_recover() {
+	require REPOSITORY WATCH_RUN_URL
+	local number numbers
+	numbers=$(gh api --paginate "repos/$REPOSITORY/issues?labels=$LABEL&state=open&per_page=100" |
+		jq -s -r --arg title "$ALERT_TITLE" --arg bot "$BOT_LOGIN" 'add // [] | .[]
+			| select(.title == $title and .user.login == $bot and (.pull_request | not)) | .number')
+	if [ -z "$numbers" ]; then
+		log 'No open failure issue to close.'
+		return
+	fi
+	for number in $numbers; do
+		if dry_run; then
+			log "Dry run: would comment on and close issue #$number: $ALERT_TITLE"
+			continue
+		fi
+		# The comment goes first, so that it reaches the subscribers together with the closing.
+		jq -n --arg body "The security watch passes again: $WATCH_RUN_URL" '{body: $body}' |
+			gh api -X POST "repos/$REPOSITORY/issues/$number/comments" --input - > /dev/null
+		gh api -X PATCH "repos/$REPOSITORY/issues/$number" -f state=closed -f state_reason=completed > /dev/null
+		log "Closed issue #$number: $ALERT_TITLE"
+	done
+}
+
 case "${1:-}" in
 	decide) cmd_decide ;;
 	report) cmd_report ;;
 	alert) cmd_alert ;;
-	*) die "usage: $0 decide|report|alert" ;;
+	recover) cmd_recover ;;
+	*) die "usage: $0 decide|report|alert|recover" ;;
 esac

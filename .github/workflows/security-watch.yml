@@ -4,8 +4,9 @@ name: Security watch
 # php:<php>-fpm-alpine image or an Alpine package fix is available, instead of waiting for the
 # weekly rebuild in ci.yml, and records each fix in a security-watch issue once the published
 # images carry it. A PHP security release that another rebuild published first is recorded
-# without a rebuild. The decision logic lives in .github/scripts/security-watch.sh, where
-# .github/scripts/tests/run.sh tests it against fixtures.
+# without a rebuild. A failing run opens a failure issue, which the next passing run closes. The
+# decision logic lives in .github/scripts/security-watch.sh, where .github/scripts/tests/run.sh
+# tests it against fixtures.
 on:
   schedule:
     # Off the hour, so the run does not queue behind the top-of-the-hour scheduling peak.
@@ -146,10 +147,37 @@ jobs:
           WATCH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: .github/scripts/security-watch.sh report
 
-  # A failing watch detects nothing, so it must not fail silently.
+  # Closes the failure issue once a run passes again, so that an open one always means the watch
+  # is failing. Like report, it keeps the issue-write token out of the jobs that run Trivy. rescan
+  # and report are skipped when there is nothing to rescan or report, which still counts as a pass.
+  recover:
+    name: Close failure issue
+    needs: [ scan, decide, rescan, report ]
+    if: >-
+      ${{ !cancelled() && needs.scan.result == 'success' && needs.decide.result == 'success'
+      && (needs.rescan.result == 'success' || needs.rescan.result == 'skipped')
+      && (needs.report.result == 'success' || needs.report.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Comment on and close the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WATCH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: .github/scripts/security-watch.sh recover
+
+  # A failing watch detects nothing, so it must not fail silently. That includes a failed recover.
   alert:
     name: Alert on failure
-    needs: [ scan, decide, rescan, report ]
+    needs: [ scan, decide, rescan, report, recover ]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 10
