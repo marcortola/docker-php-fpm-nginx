@@ -473,7 +473,7 @@ state as $state
 | ($state == "fixed" or $state == "published") as $done
 | [
 	(if $state == "fixed" then "The rebuild succeeded and the published images carry the fix."
-	elif $state == "published" then "A rebuild the watch did not start, such as the weekly rebuild or a push to main, already published the fix, so no rebuild was needed."
+	elif $state == "published" then "A rebuild since the last notice, such as the weekly rebuild or a push to main, already published the fix, so no rebuild was needed."
 	elif $state == "failed" then "**The rebuild failed** (conclusion: `\($rebuild.conclusion)`). The published images may still be vulnerable. The watch does not retry these findings: fix the cause and rebuild with `gh workflow run ci.yml --ref main`."
 	elif $state == "unfinished" then "**The rebuild did not finish** while the watch waited. The published images may still be vulnerable. The watch does not retry these findings: check the run, and rebuild with `gh workflow run ci.yml --ref main` if it failed."
 	else "**The rebuild succeeded, but the published images do not carry every fix.** The watch does not retry these findings: check the images and the run below." end),
