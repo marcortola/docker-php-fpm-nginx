@@ -443,7 +443,7 @@ test_published_and_lagging_branches_in_one_run() {
 	local php82 php85
 	php82=$(calls '^gh POST repos/example/repo/issues ' | sed -E 's/^gh [A-Z]+ [^ ]+ //' | jq -c 'select(.title == "Security update: PHP 8.2.35")')
 	php85=$(calls '^gh POST repos/example/repo/issues ' | sed -E 's/^gh [A-Z]+ [^ ]+ //' | jq -c 'select(.title == "Security update: PHP 8.5.12")')
-	[ -n "$php82" ] && [ -n "$php85" ] || fail "issues: $(calls '^gh POST repos/example/repo/issues ')"
+	if [ -z "$php82" ] || [ -z "$php85" ]; then fail "issues: $(calls '^gh POST repos/example/repo/issues ')"; fi
 	[ "$(calls '^gh POST repos/example/repo/issues ' | wc -l)" -eq 2 ] || fail 'expected two issues'
 	expect_body "$php82" 'The rebuild succeeded and the published images carry the fix.'
 	expect_body "$php82" 'PHP 8.2.33 -> 8.2.35'
