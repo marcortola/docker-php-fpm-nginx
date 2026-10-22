@@ -1,0 +1,169 @@
+name: Security watch
+
+# Rebuilds every published tag as soon as a PHP security release reaches the upstream
+# php:<php>-fpm-alpine image or an Alpine package fix is available, instead of waiting for the
+# weekly rebuild in ci.yml, and records each fix in a security-watch issue once the published
+# images carry it. A PHP security release that another rebuild published first is recorded
+# without a rebuild. The decision logic lives in .github/scripts/security-watch.sh, where
+# .github/scripts/tests/run.sh tests it against fixtures.
+on:
+  schedule:
+    # Off the hour, so the run does not queue behind the top-of-the-hour scheduling peak.
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Log the findings and the actions they would trigger; dispatch nothing and write no issues.
+        type: boolean
+        default: false
+
+# A second run must not dispatch a duplicate rebuild or issue while the first one waits.
+concurrency:
+  group: security-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    uses: ./.github/workflows/trivy-scan.yml
+    permissions:
+      contents: read
+    with:
+      artifact-prefix: trivy-scan
+
+  decide:
+    name: Decide and rebuild
+    needs: scan
+    runs-on: ubuntu-latest
+    # The script waits up to 120 minutes for the rebuild.
+    timeout-minutes: 150
+    permissions:
+      # Re-enables the workflows and dispatches ci.yml.
+      actions: write
+      contents: read
+      # Reads the security-watch issues that already record a finding.
+      issues: read
+    outputs:
+      report: ${{ steps.decide.outputs.report }}
+      rescan: ${{ steps.decide.outputs.rescan }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # GitHub disables scheduled workflows in public repositories after 60 days without
+      # repository activity. Both this watch and the weekly rebuild must outlive quiet periods.
+      - name: Keep schedules enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh api -X PUT "repos/$REPOSITORY/actions/workflows/ci.yml/enable"
+          gh api -X PUT "repos/$REPOSITORY/actions/workflows/security-watch.yml/enable"
+
+      # Inspecting the published images then counts against the account's pull limit rather than
+      # the anonymous limit that runners share. The token is read-only, so this job cannot push.
+      - name: Login to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_READONLY_TOKEN }}
+
+      - name: Download scan reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: trivy-scan-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/scan
+
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          STATE_DIR: ${{ runner.temp }}/state
+          SCAN_DIR: ${{ runner.temp }}/scan
+          WATCH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: .github/scripts/security-watch.sh decide
+
+      - name: Upload decision
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-watch-decision
+          path: ${{ runner.temp }}/state/decision.json
+          if-no-files-found: error
+          retention-days: 14
+
+  # Scans the rebuilt images, again without secrets, so the report can state whether each Alpine
+  # package fix reached the published tags.
+  rescan:
+    needs: decide
+    if: needs.decide.outputs.rescan == 'true'
+    uses: ./.github/workflows/trivy-scan.yml
+    permissions:
+      contents: read
+    with:
+      artifact-prefix: trivy-rescan
+
+  # Issue writes live in their own job, so the scans and the rebuild never run with them.
+  report:
+    name: Report
+    needs: [ decide, rescan ]
+    if: >-
+      always() && needs.decide.result == 'success' && needs.decide.outputs.report == 'true'
+      && (needs.rescan.result == 'success' || needs.rescan.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download decision
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: security-watch-decision
+          path: ${{ runner.temp }}/state
+
+      - name: Download rescan reports
+        if: needs.rescan.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: trivy-rescan-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/rescan
+
+      - name: Write issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          STATE_DIR: ${{ runner.temp }}/state
+          RESCAN_DIR: ${{ runner.temp }}/rescan
+          WATCH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .github/scripts/security-watch.sh report
+
+  # A failing watch detects nothing, so it must not fail silently.
+  alert:
+    name: Alert on failure
+    needs: [ scan, decide, rescan, report ]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Open or comment on the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WATCH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: .github/scripts/security-watch.sh alert

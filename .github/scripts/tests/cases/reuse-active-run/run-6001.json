@@ -1,0 +1,20 @@
+[
+  {
+    "id": 6001,
+    "html_url": "https://github.com/example/repo/actions/runs/6001",
+    "status": "queued",
+    "conclusion": null
+  },
+  {
+    "id": 6001,
+    "html_url": "https://github.com/example/repo/actions/runs/6001",
+    "status": "in_progress",
+    "conclusion": null
+  },
+  {
+    "id": 6001,
+    "html_url": "https://github.com/example/repo/actions/runs/6001",
+    "status": "completed",
+    "conclusion": "success"
+  }
+]

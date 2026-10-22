@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Test double for the gh API calls security-watch.sh makes. Records each call, with its request
+# body, as one line in $CALLS and answers from fixtures. Issues and comments it creates are
+# listed by later calls in the same test, as written by the workflow's token.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=stub-lib.sh
+. "$(dirname "$0")/stub-lib.sh"
+
+[ "${1:-}" = api ] || { echo "gh stub: unexpected command: $*" >&2; exit 1; }
+shift
+method=GET path='' body=''
+while [ $# -gt 0 ]; do
+	case $1 in
+		-X | --method) method=$2; shift 2 ;;
+		--paginate) shift ;;
+		-f | -F) body+="$2 "; shift 2 ;;
+		--input)
+			[ "$2" = - ] || { echo "gh stub: --input $2 is not stdin" >&2; exit 1; }
+			body=$(jq -c .)
+			shift 2
+			;;
+		-*) echo "gh stub: unexpected option $1" >&2; exit 1 ;;
+		*) path=$1; shift ;;
+	esac
+done
+printf 'gh %s %s %s\n' "$method" "$path" "$body" >> "$CALLS"
+
+readonly bot='github-actions[bot]'
+created() { cat "$STUB_STATE/created-$1" 2> /dev/null || echo '[]'; }
+record() { jq -c --argjson item "$2" '. + [$item]' <<< "$(created "$1")" > "$STUB_STATE/created-$1"; }
+
+route=${path#"repos/$REPOSITORY/"}
+case "$method $route" in
+	'GET issues?'*)
+		issues=$(fixture issues.json | jq --argjson created "$(created issues.json)" '. + $created')
+		if [[ $route == *state=open* ]]; then
+			jq '[.[] | select(.state == "open")]' <<< "$issues"
+		else
+			printf '%s\n' "$issues"
+		fi
+		;;
+	'GET issues/comments?'*) fixture comments.json | jq --argjson created "$(created comments.json)" '. + $created' ;;
+	'GET labels?'*) fixture labels.json ;;
+	'POST labels') echo '{}' ;;
+	'GET actions/workflows/ci.yml/runs?'*) fixture ci-runs.json ;;
+	'POST actions/workflows/ci.yml/dispatches') fixture dispatch.json ;;
+	'GET actions/runs/'*)
+		# A run fixture that is an array answers each poll with its next element, then repeats
+		# the last one; an element "fail" fails that poll. A completed answer marks the images
+		# as rebuilt for the docker stub.
+		id=${route#actions/runs/}
+		polls=$(cat "$STUB_STATE/polls-$id" 2> /dev/null || echo 0)
+		echo $((polls + 1)) > "$STUB_STATE/polls-$id"
+		run=$(fixture "run-$id.json" | jq --argjson n "$polls" 'if type == "array" then .[[$n, length - 1] | min] else . end')
+		if [ "$run" = '"fail"' ]; then echo "gh: HTTP 502: Bad Gateway" >&2; exit 1; fi
+		if jq -e '.status == "completed"' <<< "$run" > /dev/null; then touch "$STUB_STATE/rebuilt"; fi
+		printf '%s\n' "$run"
+		;;
+	'POST issues')
+		number=$((100 + $(created issues.json | jq length)))
+		record issues.json "$(jq -c --argjson number "$number" --arg repo "$REPOSITORY" --arg bot "$bot" '{
+			number: $number,
+			url: "https://api.github.com/repos/\($repo)/issues/\($number)",
+			title, body, state: "open", user: {login: $bot}
+		}' <<< "$body")"
+		echo "{\"number\": $number, \"html_url\": \"https://github.com/$REPOSITORY/issues/$number\"}"
+		;;
+	'POST issues/'*'/comments')
+		number=${route#issues/}
+		number=${number%/comments}
+		record comments.json "$(jq -c --arg url "https://api.github.com/repos/$REPOSITORY/issues/$number" --arg bot "$bot" \
+			'{issue_url: $url, body, user: {login: $bot}}' <<< "$body")"
+		echo '{}'
+		;;
+	*) echo "gh stub: unexpected call $method $path" >&2; exit 1 ;;
+esac

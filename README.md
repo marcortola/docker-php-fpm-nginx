@@ -5,10 +5,19 @@ and `marcortola/php-fpm-nginx:<php>-debug` (with Xdebug).
 
 ## Tags
 
-`<php>` is one of `8.2`, `8.3`, `8.4` and `8.5`, the PHP branches that still receive upstream
-security fixes. Every tag is rebuilt each Monday at 02:17 UTC from the current
-`php:<php>-fpm-alpine`, so upstream fixes reach the published images without a commit. The `7.4`
-and `8.1` tags remain on Docker Hub but are no longer built, and get no fixes.
+`<php>` is `8.2` or `8.5`. Every tag is rebuilt each Monday at 02:17 UTC from the current
+`php:<php>-fpm-alpine` with Alpine packages upgraded, so upstream fixes reach the published images
+without a commit.
+
+A security watch also runs every 6 hours. When upstream ships a PHP security release, or a
+fixable HIGH or CRITICAL Alpine package vulnerability appears in a published tag, it rebuilds
+every tag at once, checks that the published images carry the fix, and records what was fixed in
+an issue labelled `security-watch`. Once the watch has notified a PHP branch, a later PHP security
+release that the weekly rebuild or a push published first gets an issue too, without a rebuild. A failed
+rebuild or a failing watch is recorded in an issue as well.
+
+The `7.4`, `8.1`, `8.3` and `8.4` tags remain on Docker Hub but are no longer built, and get no
+fixes.
 
 ## Non-root mode
 
@@ -20,7 +29,7 @@ checkout. A non-root mode avoids that: start the container as your own uid, with
 ```yaml
 services:
   app:
-    image: marcortola/php-fpm-nginx:8.4-debug
+    image: marcortola/php-fpm-nginx:8.5-debug
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     group_add: ["0"]
     environment:

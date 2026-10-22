@@ -1,0 +1,60 @@
+name: Trivy scan
+
+# Scans every published tag for fixable HIGH and CRITICAL Alpine package vulnerabilities and
+# uploads one JSON report per tag. security-watch.yml calls it before deciding and again after a
+# rebuild. It runs in jobs that hold no secrets and only read the repository, because the scanner
+# is third-party code that a supply-chain compromise has already reached once (see below).
+on:
+  workflow_call:
+    inputs:
+      artifact-prefix:
+        description: Each report is uploaded as the artifact <artifact-prefix>-<tag>.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan ${{ matrix.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # One missing report makes the decision fail anyway; letting the other tags finish keeps
+      # their reports for diagnosis.
+      fail-fast: false
+      matrix:
+        tag: [ '8.2', '8.2-debug', '8.5', '8.5-debug' ]
+    steps:
+      # Trivy v0.69.4 and trivy-action releases before 0.35.0 were compromised in March 2026
+      # (GHSA-69fq-xp46-6x23, CVE-2026-33634; https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23
+      # and https://www.aquasec.com/blog/trivy-supply-chain-attack-what-you-need-to-know). v0.36.0
+      # was released after the remediation and installs Trivy through setup-trivy v0.2.6, the
+      # fixed release. The binary is pinned to v0.69.3, the release the advisory names as safe,
+      # instead of the action's moving default.
+      - name: Scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.69.3
+          scan-type: image
+          image-ref: marcortola/php-fpm-nginx:${{ matrix.tag }}
+          scanners: vuln
+          vuln-type: os
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # The package list lets the report job state the version each tag ships after a rebuild.
+          list-all-pkgs: true
+          format: json
+          output: ${{ matrix.tag }}.json
+          # Findings are not a scan failure; security-watch.sh decides on them. A scanner error
+          # still exits non-zero and fails this job.
+          exit-code: 0
+
+      - name: Upload report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact-prefix }}-${{ matrix.tag }}
+          path: ${{ matrix.tag }}.json
+          if-no-files-found: error
+          retention-days: 14

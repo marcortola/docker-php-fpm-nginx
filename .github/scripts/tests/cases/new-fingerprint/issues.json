@@ -1,0 +1,22 @@
+[
+  {
+    "number": 3,
+    "url": "https://api.github.com/repos/example/repo/issues/3",
+    "title": "Security update: Alpine packages (8.5)",
+    "state": "closed",
+    "body": "<!-- security-watch:fingerprint=0123456789abcdef -->",
+    "user": {
+      "login": "github-actions[bot]"
+    }
+  },
+  {
+    "number": 7,
+    "url": "https://api.github.com/repos/example/repo/issues/7",
+    "title": "Security update: Alpine packages (8.5)",
+    "state": "open",
+    "body": "<!-- security-watch:fingerprint=fedcba9876543210 -->",
+    "user": {
+      "login": "github-actions[bot]"
+    }
+  }
+]

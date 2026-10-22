@@ -27,8 +27,10 @@ ENV NGINX_PID_FILE=/var/run/nginx.pid \
     NGINX_TEMP_PATHS="" \
     FPM_LISTEN_OWNERSHIP_COMMENT=""
 
-# Install deps
-RUN apk add --update --no-cache \
+# Install deps. The upgrade applies Alpine package fixes published after upstream built
+# php:<php>-fpm-alpine, which a rebuild would otherwise inherit unpatched.
+RUN apk upgrade --no-cache \
+    && apk add --update --no-cache \
         gettext \
         nginx \
         supervisor
