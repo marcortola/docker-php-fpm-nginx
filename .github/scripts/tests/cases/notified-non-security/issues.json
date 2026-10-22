@@ -1,0 +1,10 @@
+[
+  {
+    "number": 4,
+    "url": "https://api.github.com/repos/example/repo/issues/4",
+    "title": "Security update: PHP 8.5.9",
+    "state": "closed",
+    "body": "<!-- security-watch:php-notified=8.5:8.5.9 -->",
+    "user": {"login": "github-actions[bot]"}
+  }
+]

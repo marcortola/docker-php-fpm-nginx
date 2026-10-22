@@ -4,6 +4,9 @@
     "url": "https://api.github.com/repos/example/repo/issues/12",
     "title": "Security watch failing",
     "state": "open",
-    "body": "The security watch failed: https://github.com/example/repo/actions/runs/800"
+    "body": "The security watch failed: https://github.com/example/repo/actions/runs/800",
+    "user": {
+      "login": "github-actions[bot]"
+    }
   }
 ]

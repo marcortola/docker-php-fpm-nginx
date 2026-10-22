@@ -3,7 +3,8 @@ name: Security watch
 # Rebuilds every published tag as soon as a PHP security release reaches the upstream
 # php:<php>-fpm-alpine image or an Alpine package fix is available, instead of waiting for the
 # weekly rebuild in ci.yml, and records each fix in a security-watch issue once the published
-# images carry it. The decision logic lives in .github/scripts/security-watch.sh, where
+# images carry it. A PHP security release that another rebuild published first is recorded
+# without a rebuild. The decision logic lives in .github/scripts/security-watch.sh, where
 # .github/scripts/tests/run.sh tests it against fixtures.
 on:
   schedule:

@@ -1,10 +1,16 @@
 [
   {
     "issue_url": "https://api.github.com/repos/example/repo/issues/2",
-    "body": "<!-- security-watch:fingerprint=0000000000000000 -->"
+    "body": "<!-- security-watch:fingerprint=0000000000000000 -->",
+    "user": {
+      "login": "github-actions[bot]"
+    }
   },
   {
     "issue_url": "https://api.github.com/repos/example/repo/issues/5",
-    "body": "**The rebuild failed**\n\n<!-- security-watch:fingerprint=5cfc8ae0f8bb0922 -->"
+    "body": "**The rebuild failed**\n\n<!-- security-watch:fingerprint=5cfc8ae0f8bb0922 -->",
+    "user": {
+      "login": "github-actions[bot]"
+    }
   }
 ]

@@ -4,6 +4,9 @@
     "url": "https://api.github.com/repos/example/repo/issues/5",
     "title": "Security update: PHP 8.5.10",
     "state": "closed",
-    "body": "Opened before the fingerprint was recorded."
+    "body": "Opened before the fingerprint was recorded.",
+    "user": {
+      "login": "github-actions[bot]"
+    }
   }
 ]

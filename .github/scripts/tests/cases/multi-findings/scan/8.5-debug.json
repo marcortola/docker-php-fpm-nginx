@@ -1,0 +1,57 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.69.3"
+  },
+  "ArtifactName": "marcortola/php-fpm-nginx:8.5-debug",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "OS": {
+      "Family": "alpine",
+      "Name": "3.24.2"
+    }
+  },
+  "Results": [
+    {
+      "Target": "marcortola/php-fpm-nginx:8.5-debug (alpine 3.24.2)",
+      "Class": "os-pkgs",
+      "Type": "alpine",
+      "Packages": [
+        {
+          "ID": "libcrypto3@3.5.4-r0",
+          "Name": "libcrypto3",
+          "Version": "3.5.4-r0"
+        },
+        {
+          "ID": "musl@1.2.5-r12",
+          "Name": "musl",
+          "Version": "1.2.5-r12"
+        }
+      ],
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-0001",
+          "PkgID": "libcrypto3@3.5.4-r0",
+          "PkgName": "libcrypto3",
+          "InstalledVersion": "3.5.4-r0",
+          "FixedVersion": "3.5.8-r0",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-0001",
+          "Title": "openssl: example flaw"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-0002",
+          "PkgID": "libcrypto3@3.5.4-r0",
+          "PkgName": "libcrypto3",
+          "InstalledVersion": "3.5.4-r0",
+          "FixedVersion": "3.5.8-r0",
+          "Status": "fixed",
+          "Severity": "MEDIUM",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-0002",
+          "Title": "openssl: minor flaw"
+        }
+      ]
+    }
+  ]
+}

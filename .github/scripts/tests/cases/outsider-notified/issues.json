@@ -1,0 +1,18 @@
+[
+  {
+    "number": 4,
+    "url": "https://api.github.com/repos/example/repo/issues/4",
+    "title": "Security update: PHP 8.5.10",
+    "state": "closed",
+    "body": "The rebuild succeeded and the published images carry the fix.\n\n<!-- security-watch:fingerprint=5cfc8ae0f8bb0922 -->\n<!-- security-watch:php-notified=8.5:8.5.10 -->",
+    "user": {"login": "github-actions[bot]"}
+  },
+  {
+    "number": 2,
+    "url": "https://api.github.com/repos/example/repo/issues/2",
+    "title": "Security update: PHP 8.5.9",
+    "state": "closed",
+    "body": "<!-- security-watch:php-notified=8.5:8.5.9 -->",
+    "user": {"login": "github-actions[bot]"}
+  }
+]

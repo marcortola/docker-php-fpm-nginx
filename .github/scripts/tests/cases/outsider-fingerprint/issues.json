@@ -1,0 +1,10 @@
+[
+  {
+    "number": 5,
+    "url": "https://api.github.com/repos/example/repo/issues/5",
+    "title": "Security update: Alpine packages (8.5)",
+    "state": "closed",
+    "body": "The rebuild succeeded and the published images carry the fix.",
+    "user": {"login": "github-actions[bot]"}
+  }
+]

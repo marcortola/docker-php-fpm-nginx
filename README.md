@@ -12,8 +12,9 @@ without a commit.
 A security watch also runs every 6 hours. When upstream ships a PHP security release, or a
 fixable HIGH or CRITICAL Alpine package vulnerability appears in a published tag, it rebuilds
 every tag at once, checks that the published images carry the fix, and records what was fixed in
-an issue labelled `security-watch`. A failed rebuild or a failing watch is recorded in an issue
-too.
+an issue labelled `security-watch`. A PHP security release that the weekly rebuild or a push
+published first gets an issue too, without a rebuild. A failed rebuild or a failing watch is
+recorded in an issue as well.
 
 The `7.4`, `8.1`, `8.3` and `8.4` tags remain on Docker Hub but are no longer built, and get no
 fixes.

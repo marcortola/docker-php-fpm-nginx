@@ -7,10 +7,12 @@
 #
 #   decide  Collects PHP and Alpine package findings, drops those a security-watch issue
 #           already records, rebuilds every tag through ci.yml for the rest, waits for the run
-#           and re-inspects the published PHP versions. Writes $STATE_DIR/decision.json and the
-#           step outputs `report` and `rescan`.
-#   report  Opens or comments on one issue per finding group in $STATE_DIR/decision.json,
-#           verifying Alpine package fixes against the Trivy reports in $RESCAN_DIR.
+#           and re-inspects the published PHP versions. A PHP security release that another
+#           rebuild published since the last notice needs no rebuild, only a notice. Writes
+#           $STATE_DIR/decision.json and the step outputs `report` and `rescan`.
+#   report  Opens or comments on one issue per finding group in $STATE_DIR/decision.json that
+#           no issue records yet, verifying Alpine package fixes against the Trivy reports in
+#           $RESCAN_DIR.
 #   alert   Opens or comments on the "Security watch failing" issue.
 #
 # Environment: REPOSITORY (owner/name), STATE_DIR, SCAN_DIR (decide), RESCAN_DIR (report, when
@@ -29,6 +31,10 @@ readonly DRY_RUN=${DRY_RUN:-false}
 readonly POLL_SECONDS=${POLL_SECONDS:-60}
 readonly WAIT_MINUTES=${WAIT_MINUTES:-120}
 readonly WATCH_RUN_URL=${WATCH_RUN_URL:-}
+readonly SERVER_URL=${GITHUB_SERVER_URL:-https://github.com}
+# The author of everything this workflow writes with GITHUB_TOKEN. Anyone can comment on a
+# public issue, so a marker any other account wrote must not silence a finding.
+readonly BOT_LOGIN='github-actions[bot]'
 
 log() { printf '%s\n' "$*" >&2; }
 die() { log "error: $*"; exit 1; }
@@ -84,8 +90,14 @@ fetch_feed() {
 # A PHP finding exists when our tags lag upstream php:<php>-fpm-alpine and a release in
 # (ours, upstream] is a security release. A security release php.net announced that upstream
 # has not built yet is no finding: a later watch run sees it once upstream ships it.
+#
+# The weekly rebuild or a push to main can also publish a security release before the watch
+# sees our tags lag, and consumers would then miss it. So every PHP notice records the version
+# it notified up to, and a security release in (notified, ours] is a finding too: one that
+# needs no rebuild, only a notice. Without a notice for a branch, our tags are the baseline.
 php_findings() {
-	local php version upstream base debug ours feed result findings='[]'
+	local php version upstream base debug ours notified feed result findings='[]' notices
+	notices=$(notified_versions)
 	for php in $PHP_VERSIONS; do
 		upstream=$(php_version_of "php:$php-fpm-alpine")
 		base=$(php_version_of "$IMAGE:$php")
@@ -94,41 +106,73 @@ php_findings() {
 			[[ $version == "$php".* ]] || die "PHP $version found where $php.x was expected"
 		done
 		ours=$(printf '%s\n' "$base" "$debug" | sort -V | head -n 1)
+		notified=$(jq -r --arg php "$php" '.[$php] // empty' <<< "$notices")
 		feed=$(fetch_feed "$php")
 		result=$(jq -n --argjson feed "$feed" --arg php "$php" --arg image "$IMAGE" \
-			--arg upstream "$upstream" --arg base "$base" --arg debug "$debug" --arg ours "$ours" '
+			--arg upstream "$upstream" --arg base "$base" --arg debug "$debug" --arg ours "$ours" \
+			--arg notified "$notified" '
 			def v: split(".") | map(tonumber);
+			def security($from; $to):
+				[$feed | to_entries[] | select((.key | v) > $from and (.key | v) <= $to)
+					| select(any((.value.tags // [])[]; . == "security"))
+					| {
+						version: .key,
+						date: (.value.date // ""),
+						url: (if (.value.announcement | type) == "object"
+								and (.value.announcement.English | type) == "string"
+							then "https://www.php.net" + .value.announcement.English
+							else "https://www.php.net/ChangeLog-\($php | split(".")[0]).php#\(.key)" end)
+					}]
+				| sort_by(.version | v);
 			($ours | v) as $o | ($upstream | v) as $u
+			| (if $notified == "" then null else $notified | v end) as $n
 			| ([$feed | keys[] | v] | min) as $oldest
-			| [$feed | to_entries[] | select((.key | v) > $o and (.key | v) <= $u)
-				| select(any((.value.tags // [])[]; . == "security"))
+			| {($image + ":" + $php): $base, ($image + ":" + $php + "-debug"): $debug} as $before
+			| if $o < $u and ((security($o; $u) | length) > 0 or $o < $oldest) then
+				# The notice lists every security release since the last one, not only those
+				# the rebuild brings.
+				(if $n != null and $n < $o then $notified else $ours end) as $from
 				| {
-					version: .key,
-					date: (.value.date // ""),
-					url: (if (.value.announcement | type) == "object"
-							and (.value.announcement.English | type) == "string"
-						then "https://www.php.net" + .value.announcement.English
-						else "https://www.php.net/ChangeLog-\($php | split(".")[0]).php#\(.key)" end)
-				}] as $security
-			| if $o >= $u then
-				{reason: "up to date with upstream \($upstream)"}
-			elif ($security | length) == 0 and $o >= $oldest then
-				{reason: "upstream \($upstream) holds no security release after \($ours)"}
-			else {
-				reason: "security release in (\($ours), \($upstream)]",
+					reason: "security release in (\($ours), \($upstream)]",
+					finding: {
+						kind: "php",
+						php: $php,
+						issue: "Security update: PHP \($upstream)",
+						key: "php \($php) \($ours)->\($upstream)",
+						ours: $ours,
+						upstream: $upstream,
+						from: $from,
+						to: $upstream,
+						before: $before,
+						releases: security($from | v; $u),
+						beyond_feed: (($from | v) < $oldest)
+					}
+				}
+			elif $n != null and $o > $n and ((security($n; $o) | length) > 0 or $n < $oldest) then {
+				reason: "security release in (\($notified), \($ours)] published since the last notice",
 				finding: {
 					kind: "php",
 					php: $php,
-					issue: "Security update: PHP \($upstream)",
-					key: "php \($php) \($ours)->\($upstream)",
+					notify_only: true,
+					issue: "Security update: PHP \($ours)",
+					key: "php-published \($php) \($notified)->\($ours)",
 					ours: $ours,
 					upstream: $upstream,
-					before: {($image + ":" + $php): $base, ($image + ":" + $php + "-debug"): $debug},
-					releases: ($security | sort_by(.version | v)),
-					beyond_feed: ($o < $oldest)
+					from: $notified,
+					to: $ours,
+					before: $before,
+					after: $before,
+					verified: true,
+					releases: security($n; $o),
+					beyond_feed: ($n < $oldest)
 				}
-			} end')
-		log "PHP $php: ours $ours ($IMAGE:$php $base, $IMAGE:$php-debug $debug), upstream $upstream: $(jq -r .reason <<< "$result")"
+			}
+			elif $o >= $u then
+				{reason: "up to date with upstream \($upstream)"}
+			else
+				{reason: "upstream \($upstream) holds no security release after \($ours)"}
+			end')
+		log "PHP $php: ours $ours ($IMAGE:$php $base, $IMAGE:$php-debug $debug), upstream $upstream: $(jq -r .reason <<< "$result")${notified:+ (notified up to $notified)}"
 		findings=$(jq -c --argjson result "$result" '. + [$result.finding // empty]' <<< "$findings")
 	done
 	printf '%s\n' "$findings"
@@ -183,18 +227,35 @@ add_fingerprints() {
 		"${fingerprints[@]}" <<< "$findings"
 }
 
-# Fingerprints recorded by any security-watch issue, open or closed, in its body or comments.
-# Listed through the REST API: the search API does not index HTML comments reliably.
-known_fingerprints() {
+# Saves to $STATE_DIR/records.json the bodies this workflow wrote on security-watch issues,
+# open or closed: the issues themselves and their comments. Listed through the REST API: the
+# search API does not index HTML comments reliably.
+load_records() {
 	gh api --paginate "repos/$REPOSITORY/issues?labels=$LABEL&state=all&per_page=100" |
 		jq -s 'add // []' > "$STATE_DIR/issues.json"
 	gh api --paginate "repos/$REPOSITORY/issues/comments?per_page=100" |
 		jq -s 'add // []' > "$STATE_DIR/comments.json"
-	jq -n --slurpfile issues "$STATE_DIR/issues.json" --slurpfile comments "$STATE_DIR/comments.json" '
+	jq -n --arg bot "$BOT_LOGIN" \
+		--slurpfile issues "$STATE_DIR/issues.json" --slurpfile comments "$STATE_DIR/comments.json" '
 		($issues[0] | map(.url)) as $urls
-		| [($issues[0][] | .body), ($comments[0][] | select(.issue_url as $u | $urls | index($u)) | .body)]
-		| [.[] | strings | scan("<!-- security-watch:fingerprint=([0-9a-f]{16}) -->")[0]]
-		| unique'
+		| [($issues[0][] | select(.user.login == $bot) | .body),
+			($comments[0][] | select(.user.login == $bot and (.issue_url as $u | $urls | index($u))) | .body)]
+		| map(strings)' > "$STATE_DIR/records.json"
+}
+
+# Fingerprints the records hold, so a finding any issue records is never acted on again.
+known_fingerprints() {
+	jq '[.[] | scan("<!-- security-watch:fingerprint=([0-9a-f]{16}) -->")[0]] | unique' \
+		"$STATE_DIR/records.json"
+}
+
+# The highest version each PHP branch has been notified up to, such as {"8.5": "8.5.12"}.
+notified_versions() {
+	jq 'def v: split(".") | map(tonumber);
+		[.[] | scan("<!-- security-watch:php-notified=([0-9]+\\.[0-9]+):([0-9]+\\.[0-9]+\\.[0-9]+) -->")
+			| select(.[0] as $php | .[1] | startswith($php + "."))]
+		| group_by(.[0]) | map({key: .[0][0], value: (map(.[1]) | max_by(v))}) | from_entries' \
+		"$STATE_DIR/records.json"
 }
 
 epoch_jq='def epoch: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;'
@@ -230,15 +291,22 @@ dispatch_rebuild() {
 		die "dispatching ci.yml returned no run id"
 }
 
-# Waits for a ci.yml run; prints {id, url, finished, conclusion}.
+# Waits for a ci.yml run; prints {id, url, finished, conclusion}. A failed poll is retried until
+# the deadline, since the run is already dispatched and aborting would report nothing about it.
 wait_for_run() {
-	local id=$1 deadline=$((SECONDS + WAIT_MINUTES * 60)) run status
+	local id=$1 deadline=$((SECONDS + WAIT_MINUTES * 60)) run latest status=unknown
+	run=$(jq -n --argjson id "$id" --arg url "$SERVER_URL/$REPOSITORY/actions/runs/$id" \
+		'{id: $id, html_url: $url}')
 	while :; do
-		run=$(gh api "repos/$REPOSITORY/actions/runs/$id")
-		status=$(jq -er .status <<< "$run")
-		if [ "$status" = completed ]; then
-			jq '{id, url: .html_url, finished: true, conclusion}' <<< "$run"
-			return
+		if latest=$(gh api "repos/$REPOSITORY/actions/runs/$id") && status=$(jq -er .status <<< "$latest"); then
+			run=$latest
+			if [ "$status" = completed ]; then
+				jq '{id, url: .html_url, finished: true, conclusion}' <<< "$run"
+				return
+			fi
+		else
+			status=unknown
+			log "cannot read ci.yml run $id; retrying"
 		fi
 		if [ "$SECONDS" -ge "$deadline" ]; then
 			log "ci.yml run $id is still $status after $WAIT_MINUTES minutes"
@@ -253,7 +321,7 @@ wait_for_run() {
 # Marks each PHP finding verified when both its published tags now carry upstream's version.
 verify_php() {
 	local findings=$1 index php tag version after
-	for index in $(jq -r 'to_entries[] | select(.value.kind == "php") | .key' <<< "$findings"); do
+	for index in $(jq -r 'to_entries[] | select(.value.kind == "php" and .value.notify_only != true) | .key' <<< "$findings"); do
 		php=$(jq -r ".[$index].php" <<< "$findings")
 		after='{}'
 		for tag in "$php" "$php-debug"; do
@@ -284,7 +352,8 @@ write_decision() { # findings, rebuild
 cmd_decide() {
 	require REPOSITORY STATE_DIR SCAN_DIR
 	mkdir -p "$STATE_DIR"
-	local php alpine findings known new count run_id reused=false rebuild rescan=false
+	local php alpine findings known new count unbuilt run_id reused=false rebuild rescan=false
+	load_records
 	php=$(php_findings)
 	alpine=$(alpine_findings)
 	findings=$(printf '%s\n' "$php" "$alpine" | jq -s 'add' | add_fingerprints)
@@ -302,7 +371,23 @@ cmd_decide() {
 		return
 	fi
 
-	run_id=$(active_rebuild "$new")
+	# Findings a published image already fixes need a notice, not a rebuild.
+	unbuilt=$(jq -c '[.[] | select(.notify_only != true)]' <<< "$new")
+	if [ "$(jq length <<< "$unbuilt")" -eq 0 ]; then
+		if dry_run; then
+			log "Dry run: $count new finding(s), all already published; would write issues."
+			write_decision "$new" null
+			output report false
+		else
+			log "$count new finding(s), all already published; no rebuild needed."
+			write_decision "$new" null
+			output report true
+		fi
+		output rescan false
+		return
+	fi
+
+	run_id=$(active_rebuild "$unbuilt")
 	if dry_run; then
 		if [ -n "$run_id" ]; then
 			log "Dry run: $count new finding(s); would wait for ci.yml run $run_id, then write issues."
@@ -319,7 +404,7 @@ cmd_decide() {
 		log "ci.yml run $run_id already rebuilds from the current upstream image; waiting for it."
 	else
 		run_id=$(dispatch_rebuild)
-		log "Dispatched ci.yml run $run_id for $count new finding(s)."
+		log "Dispatched ci.yml run $run_id for $(jq length <<< "$unbuilt") new finding(s)."
 	fi
 	rebuild=$(wait_for_run "$run_id" | jq --argjson reused "$reused" '. + {reused: $reused}')
 	log "ci.yml run $run_id: $(jq -c . <<< "$rebuild")"
@@ -354,19 +439,20 @@ verify_alpine() {
 # shellcheck disable=SC2016 # a jq program; its $names are jq variables
 render_body_jq='
 def state:
-	if $rebuild.finished != true then "unfinished"
+	if all($group[]; .notify_only == true) then "published"
+	elif $rebuild.finished != true then "unfinished"
 	elif $rebuild.conclusion != "success" then "failed"
 	elif all($group[]; .verified == true) then "fixed"
 	else "unverified" end;
 def php_section:
 	$group[] | (
-		"PHP \(.ours) -> \(.upstream) in `\($image):\(.php)` and `\($image):\(.php)-debug`. Security releases in that range:",
+		"PHP \(.from) -> \(.to) in `\($image):\(.php)` and `\($image):\(.php)-debug`. Security releases in that range:",
 		"",
 		(.releases[] | "- [PHP \(.version)](\(.url))\(if .date != "" then " (\(.date))" else "" end)"),
-		(if .beyond_feed then "", "Our tags were older than the 20 most recent releases on php.net, so the range may hold more security releases." else empty end),
+		(if .beyond_feed then "", "PHP \(.from) is older than the 20 most recent releases on php.net, so the range may hold more security releases than listed." else empty end),
 		"",
 		(if .after then
-			"Published after the rebuild:", "",
+			(if .notify_only then "Published:" else "Published after the rebuild:" end), "",
 			(.after | to_entries[] | "- `\(.key)`: PHP \(.value)")
 		else empty end)
 	);
@@ -384,19 +470,25 @@ def alpine_section:
 	($rows[:100][] | "| \(if .url != "" then "[\(.id)](\(.url))" else .id end) | \(.pkg) | \(.installed) | \(.fixed) | \(.severity) | \(.tags | map("`\(.)`") | join(", ")) |\(if $after then " \(if .verified then "fixed" else "still reported" end)\(if .now != [] then " (\(.now | join(", ")))" else "" end) |" else "" end)"),
 	(if ($rows | length) > 100 then "", "\(($rows | length) - 100) more rows are omitted; the watch run log lists every finding." else empty end);
 state as $state
+| ($state == "fixed" or $state == "published") as $done
 | [
 	(if $state == "fixed" then "The rebuild succeeded and the published images carry the fix."
+	elif $state == "published" then "A rebuild the watch did not start, such as the weekly rebuild or a push to main, already published the fix, so no rebuild was needed."
 	elif $state == "failed" then "**The rebuild failed** (conclusion: `\($rebuild.conclusion)`). The published images may still be vulnerable. The watch does not retry these findings: fix the cause and rebuild with `gh workflow run ci.yml --ref main`."
 	elif $state == "unfinished" then "**The rebuild did not finish** while the watch waited. The published images may still be vulnerable. The watch does not retry these findings: check the run, and rebuild with `gh workflow run ci.yml --ref main` if it failed."
 	else "**The rebuild succeeded, but the published images do not carry every fix.** The watch does not retry these findings: check the images and the run below." end),
 	"",
 	(if $group[0].kind == "php" then php_section else alpine_section end),
 	"",
-	"Rebuild: \($rebuild.url)\(if $rebuild.reused then " (a run that had already started)" else "" end)",
+	(if $state != "published" then "Rebuild: \($rebuild.url)\(if $rebuild.reused then " (a run that had already started)" else "" end)" else empty end),
 	"Watch run: \($watch)",
-	(if $state == "fixed" then "", "Redeploy consumers with your private redeploy script." else empty end),
 	"",
-	($group[] | "<!-- security-watch:fingerprint=\(.fingerprint) -->")
+	(if $done then "Redeploy consumers with your private redeploy script."
+	else "Once a rebuild of ci.yml succeeds and publishes the fix, redeploy consumers with your private redeploy script." end),
+	"",
+	($group[] | "<!-- security-watch:fingerprint=\(.fingerprint) -->"),
+	# The version each PHP branch is now notified up to; see php_findings.
+	(if $done then $group[] | select(.kind == "php") | "<!-- security-watch:php-notified=\(.php):\(.to) -->" else empty end)
 ] | join("\n")'
 
 ensure_label() {
@@ -428,22 +520,34 @@ post() {
 
 cmd_report() {
 	require REPOSITORY STATE_DIR
-	local decision title body
+	local decision title body known
 	decision=$(cat "$STATE_DIR/decision.json")
 	if jq -e '.dry_run' <<< "$decision" > /dev/null; then
 		log 'Dry run: no issues written.'
 		return
 	fi
-	if jq -e '.findings == [] or .rebuild == null' <<< "$decision" > /dev/null; then
+	if jq -e '.findings == []' <<< "$decision" > /dev/null; then
 		log 'Nothing to report.'
 		return
+	fi
+	if jq -e '.rebuild == null and any(.findings[]; .notify_only != true)' <<< "$decision" > /dev/null; then
+		die 'the decision holds findings that need a rebuild, but no rebuild'
 	fi
 	if jq -e '.rebuild.conclusion == "success" and any(.findings[]; .kind == "alpine")' <<< "$decision" > /dev/null; then
 		require RESCAN_DIR
 		decision=$(verify_alpine "$decision")
 	fi
+	# A rerun of this job must not repeat the issues and comments an earlier attempt wrote.
+	load_records
+	known=$(known_fingerprints)
 	ensure_label
 	while IFS= read -r title; do
+		if jq -e --arg title "$title" --argjson known "$known" '
+			all(.findings[] | select(.issue == $title); .fingerprint as $f | $known | index($f))' \
+			<<< "$decision" > /dev/null; then
+			log "An issue already records every finding of '$title'; skipping."
+			continue
+		fi
 		body=$(jq -r --arg title "$title" --arg image "$IMAGE" '
 			.rebuild as $rebuild | .watch_run_url as $watch
 			| [.findings[] | select(.issue == $title)] as $group
@@ -457,7 +561,9 @@ cmd_alert() {
 	local title='Security watch failing' body
 	body="The security watch failed: $WATCH_RUN_URL
 
-Until it passes again, new PHP security releases and Alpine package fixes are neither detected nor rebuilt."
+Until it passes again, new PHP security releases and Alpine package fixes are neither detected nor rebuilt.
+
+The watch may have dispatched a rebuild before it failed. Check the ci.yml runs at $SERVER_URL/$REPOSITORY/actions/workflows/ci.yml, and if one succeeded, redeploy consumers with your private redeploy script."
 	if dry_run; then
 		log "Dry run: would open or comment on '$title'."
 		return

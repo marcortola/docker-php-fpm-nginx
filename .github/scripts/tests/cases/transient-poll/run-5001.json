@@ -1,0 +1,9 @@
+[
+  "fail",
+  {
+    "id": 5001,
+    "html_url": "https://github.com/example/repo/actions/runs/5001",
+    "status": "completed",
+    "conclusion": "success"
+  }
+]
