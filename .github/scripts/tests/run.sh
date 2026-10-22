@@ -264,6 +264,54 @@ test_known_and_new_findings_in_one_run() {
 	expect_body_not "$body" "$(fp 'alpine 8.5 CVE-2026-0001 libcrypto3 3.5.4-r0')"
 }
 
+# A workflow-authored body quotes poisoned release text holding a fingerprint of the 8.2 finding
+# and a notice up to 8.5.12, mid-line and at the start or end of a line with other text. Only
+# whole marker lines count, so 8.2 is still new and 8.5 is notified up to 8.5.10 only.
+test_markers_mid_line_ignored() {
+	use_case mid-line-markers
+	DRY_RUN=true run decide
+	expect_log "Finding php 8.2 8.2.33->8.2.35 \[$(fp 'php 8.2 8.2.33->8.2.35')\]: new"
+	expect_log 'PHP 8.5: .* published since the last notice \(notified up to 8.5.10\)'
+	expect_decision '[.findings[].key] == ["php 8.2 8.2.33->8.2.35", "php-published 8.5 8.5.10->8.5.12"]'
+	expect_no_writes
+}
+
+# An edit in the web interface stores the body with CRLF line endings; its markers still count.
+test_markers_on_crlf_lines_count() {
+	use_case crlf-markers
+	DRY_RUN=true run decide
+	expect_log 'PHP 8.5: .* \(notified up to 8.5.6\)'
+	expect_log "Finding php 8.5 8.5.8->8.5.10 \[$(fp 'php 8.5 8.5.8->8.5.10')\]: an issue records it; no action"
+	expect_decision '.findings == []'
+}
+
+# The php.net date and announcement of 8.5.9 and a Trivy PrimaryURL carry line breaks followed by
+# markers. The bodies keep that text inert: no marker line but the workflow's own, and no HTML
+# comment the reader cannot see, so the next run is not notified up to 8.5.99.
+test_external_text_cannot_plant_markers() {
+	use_case poisoned-text
+	cp "$here/cases/new-fingerprint/issues.json" "$FIXTURES/"
+	run decide
+	expect_decision '[.findings[].key] == ["php 8.5 8.5.8->8.5.10", "alpine 8.5 CVE-2026-0001 libcrypto3 3.5.4-r0"]'
+	run report
+	local bodies
+	bodies=$(calls '^gh POST repos/example/repo/issues' | sed -E 's/^gh [A-Z]+ [^ ]+ //' | jq -s -c 'map(.body)')
+	[ "$(jq length <<< "$bodies")" -eq 2 ] || fail "expected two bodies: $bodies"
+	jq -e --arg php "$(fp 'php 8.5 8.5.8->8.5.10')" --arg alpine "$(fp 'alpine 8.5 CVE-2026-0001 libcrypto3 3.5.4-r0')" '
+		[.[] | split("\n")[] | select(test("<!--"))] | sort == ([
+			"<!-- security-watch:fingerprint=\($php) -->",
+			"<!-- security-watch:php-notified=8.5:8.5.10 -->",
+			"<!-- security-watch:fingerprint=\($alpine) -->"
+		] | sort)' <<< "$bodies" > /dev/null || fail "bodies hold other comment lines: $bodies"
+	jq -e 'all(.[]; test("\r") | not)' <<< "$bodies" > /dev/null || fail "a body holds a carriage return: $bodies"
+	jq -e 'any(.[]; contains("(30 Jul 2026 &lt;!-- security-watch:php-notified=8.5:8.5.99 --> )"))' <<< "$bodies" > /dev/null ||
+		fail "the poisoned date is not shown inert: $bodies"
+	jq -e 'any(.[]; contains("(https://avd.aquasec.com/nvd/cve-2026-0001  &lt;!-- security-watch:fingerprint=bbbbbbbbbbbbbbbb --> )"))' <<< "$bodies" > /dev/null ||
+		fail "the poisoned URL is not shown inert: $bodies"
+	run decide
+	expect_log 'PHP 8.5: .* up to date with upstream 8.5.10 \(notified up to 8.5.10\)'
+}
+
 # A rerun of the report job finds the issue its first attempt opened and writes nothing more.
 test_report_rerun_is_idempotent() {
 	use_case security-mid-range
@@ -368,6 +416,46 @@ test_lag_finding_lists_releases_since_last_notice() {
 	expect_body "$body" 'PHP 8.5.8 -> 8.5.12'
 	expect_body "$body" 'The rebuild succeeded and the published images carry the fix.'
 	expect_body "$body" '<!-- security-watch:php-notified=8.5:8.5.12 -->'
+}
+
+# The weekly rebuild published 8.5.11 and 8.5.12 since the notice up to 8.5.10, and 8.2 lags
+# upstream 8.2.35: one rebuild serves 8.2, and 8.5 gets a notice without one. The rebuild leaves
+# the 8.5 tags alone, so they are not inspected again and their notice shows what was published.
+test_published_and_lagging_branches_in_one_run() {
+	use_case published-and-lagging
+	run decide
+	expect_output report true
+	expect_output rescan false
+	expect_decision '[.findings[].key] == ["php 8.2 8.2.33->8.2.35", "php-published 8.5 8.5.10->8.5.12"]'
+	[ "$(calls 'dispatches' | wc -l)" -eq 1 ] || fail 'expected one dispatch'
+	expect_log 'Dispatched ci.yml run 5001 for 1 new finding\(s\).'
+	expect_call '^curl https://hub.docker.com/v2/repositories/library/php/tags/8.2-fpm-alpine$'
+	expect_no_call 'hub.docker.com/.*/8.5-fpm-alpine'
+	expect_decision '.rebuild == {id: 5001, url: "https://github.com/example/repo/actions/runs/5001", finished: true, conclusion: "success", reused: false}'
+	expect_decision '.findings[0] | .verified == true and .after == {"marcortola/php-fpm-nginx:8.2": "8.2.35", "marcortola/php-fpm-nginx:8.2-debug": "8.2.35"}'
+	expect_decision '.findings[1] | .notify_only == true and .verified == true and .after == .before'
+	# verify_php re-inspects the rebuilt 8.2 tags only.
+	expect_log 'PHP 8.2 after the rebuild'
+	! grep -q 'PHP 8.5 after the rebuild' "$work/log" || fail 'verify_php inspected the notify-only 8.5 finding'
+	[ "$(calls '^docker inspect marcortola/php-fpm-nginx:8.2$' | wc -l)" -eq 2 ] || fail 'expected two inspections of the 8.2 tag'
+	[ "$(calls '^docker inspect marcortola/php-fpm-nginx:8.5$' | wc -l)" -eq 1 ] || fail 'expected one inspection of the 8.5 tag'
+	run report
+	local php82 php85
+	php82=$(calls '^gh POST repos/example/repo/issues ' | sed -E 's/^gh [A-Z]+ [^ ]+ //' | jq -c 'select(.title == "Security update: PHP 8.2.35")')
+	php85=$(calls '^gh POST repos/example/repo/issues ' | sed -E 's/^gh [A-Z]+ [^ ]+ //' | jq -c 'select(.title == "Security update: PHP 8.5.12")')
+	[ -n "$php82" ] && [ -n "$php85" ] || fail "issues: $(calls '^gh POST repos/example/repo/issues ')"
+	[ "$(calls '^gh POST repos/example/repo/issues ' | wc -l)" -eq 2 ] || fail 'expected two issues'
+	expect_body "$php82" 'The rebuild succeeded and the published images carry the fix.'
+	expect_body "$php82" 'PHP 8.2.33 -> 8.2.35'
+	expect_body "$php82" 'Rebuild: https://github.com/example/repo/actions/runs/5001'
+	expect_body "$php82" '<!-- security-watch:php-notified=8.2:8.2.35 -->'
+	expect_body_not "$php82" '8.5'
+	expect_body "$php85" 'already published the fix, so no rebuild was needed.'
+	expect_body "$php85" 'PHP 8.5.10 -> 8.5.12'
+	expect_body "$php85" '`marcortola/php-fpm-nginx:8.5`: PHP 8.5.12'
+	expect_body "$php85" '<!-- security-watch:php-notified=8.5:8.5.12 -->'
+	expect_body_not "$php85" 'Rebuild:'
+	expect_body_not "$php85" '8.2'
 }
 
 # --- rebuild outcomes -----------------------------------------------------------------------
@@ -535,6 +623,47 @@ test_alert_comments_on_open_issue_and_creates_label() {
 	expect_call '^gh POST repos/example/repo/labels name=security-watch '
 	expect_body "$(body_of '^gh POST repos/example/repo/issues/12/comments ')" 'actions/runs/900'
 	expect_no_call '^gh POST repos/example/repo/issues '
+}
+
+# A passing run says so on the failure issue and closes it; the next passing run finds nothing
+# open and writes nothing.
+test_recover_closes_failure_issue() {
+	use_case alert-open-issue
+	run recover
+	expect_body "$(body_of '^gh POST repos/example/repo/issues/12/comments ')" \
+		'The security watch passes again: https://github.com/example/repo/actions/runs/900'
+	expect_call '^gh PATCH repos/example/repo/issues/12 state=closed state_reason=completed $'
+	# The comment comes first, so it is part of the notification that the issue closed.
+	[ "$(grep -nE '^gh (POST|PATCH) ' "$CALLS" | cut -d' ' -f2 | tr '\n' ' ')" = 'POST PATCH ' ] ||
+		fail "unexpected writes: $(calls '^gh (POST|PATCH) ')"
+	expect_log 'Closed issue #12: Security watch failing'
+	run recover
+	expect_log 'No open failure issue to close.'
+	[ "$(calls '^gh (POST|PATCH) ' | wc -l)" -eq 2 ] || fail 'the second run wrote again'
+}
+
+# Only the workflow's own open failure issue counts: not an outsider's issue with that title, a
+# closed failure issue, or another open security-watch issue.
+test_recover_closes_only_own_open_failure_issue() {
+	use_case recover-mixed
+	run recover
+	expect_call '^gh POST repos/example/repo/issues/15/comments '
+	expect_call '^gh PATCH repos/example/repo/issues/15 state=closed state_reason=completed $'
+	[ "$(calls '^gh (POST|PATCH) ' | wc -l)" -eq 2 ] || fail "unexpected writes: $(calls '^gh (POST|PATCH) ')"
+}
+
+test_recover_without_failure_issue() {
+	use_case none
+	run recover
+	expect_log 'No open failure issue to close.'
+	expect_no_writes
+}
+
+test_recover_dry_run_writes_nothing() {
+	use_case alert-open-issue
+	DRY_RUN=true run recover
+	expect_log "Dry run: would comment on and close issue #12: Security watch failing"
+	expect_no_writes
 }
 
 # --- main -----------------------------------------------------------------------------------

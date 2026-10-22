@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Test double for the gh API calls security-watch.sh makes. Records each call, with its request
 # body, as one line in $CALLS and answers from fixtures. Issues and comments it creates are
-# listed by later calls in the same test, as written by the workflow's token.
+# listed by later calls in the same test, as written by the workflow's token, and issues it
+# closes are listed as closed.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=stub-lib.sh
 . "$(dirname "$0")/stub-lib.sh"
@@ -32,7 +33,8 @@ record() { jq -c --argjson item "$2" '. + [$item]' <<< "$(created "$1")" > "$STU
 route=${path#"repos/$REPOSITORY/"}
 case "$method $route" in
 	'GET issues?'*)
-		issues=$(fixture issues.json | jq --argjson created "$(created issues.json)" '. + $created')
+		issues=$(fixture issues.json | jq --argjson created "$(created issues.json)" --argjson closed "$(created closed)" '
+			. + $created | map(if (.number as $n | $closed | index($n)) then .state = "closed" else . end)')
 		if [[ $route == *state=open* ]]; then
 			jq '[.[] | select(.state == "open")]' <<< "$issues"
 		else
@@ -64,6 +66,11 @@ case "$method $route" in
 			title, body, state: "open", user: {login: $bot}
 		}' <<< "$body")"
 		echo "{\"number\": $number, \"html_url\": \"https://github.com/$REPOSITORY/issues/$number\"}"
+		;;
+	'PATCH issues/'*)
+		[ "$body" = 'state=closed state_reason=completed ' ] || { echo "gh stub: unexpected issue update $body" >&2; exit 1; }
+		record closed "${route#issues/}"
+		echo '{}'
 		;;
 	'POST issues/'*'/comments')
 		number=${route#issues/}

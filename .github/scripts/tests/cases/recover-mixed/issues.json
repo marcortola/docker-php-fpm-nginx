@@ -1,0 +1,42 @@
+[
+  {
+    "number": 12,
+    "url": "https://api.github.com/repos/example/repo/issues/12",
+    "title": "Security watch failing",
+    "state": "open",
+    "body": "Opened by someone else.",
+    "user": {
+      "login": "someone"
+    }
+  },
+  {
+    "number": 13,
+    "url": "https://api.github.com/repos/example/repo/issues/13",
+    "title": "Security watch failing",
+    "state": "closed",
+    "body": "The security watch failed: https://github.com/example/repo/actions/runs/700",
+    "user": {
+      "login": "github-actions[bot]"
+    }
+  },
+  {
+    "number": 14,
+    "url": "https://api.github.com/repos/example/repo/issues/14",
+    "title": "Security update: PHP 8.5.10",
+    "state": "open",
+    "body": "<!-- security-watch:fingerprint=5cfc8ae0f8bb0922 -->",
+    "user": {
+      "login": "github-actions[bot]"
+    }
+  },
+  {
+    "number": 15,
+    "url": "https://api.github.com/repos/example/repo/issues/15",
+    "title": "Security watch failing",
+    "state": "open",
+    "body": "The security watch failed: https://github.com/example/repo/actions/runs/800",
+    "user": {
+      "login": "github-actions[bot]"
+    }
+  }
+]

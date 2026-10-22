@@ -14,7 +14,8 @@ fixable HIGH or CRITICAL Alpine package vulnerability appears in a published tag
 every tag at once, checks that the published images carry the fix, and records what was fixed in
 an issue labelled `security-watch`. Once the watch has notified a PHP branch, a later PHP security
 release that the weekly rebuild or a push published first gets an issue too, without a rebuild. A failed
-rebuild or a failing watch is recorded in an issue as well.
+rebuild or a failing watch is recorded in an issue as well, and the watch closes its failure issue
+once it passes again.
 
 The `7.4`, `8.1`, `8.3` and `8.4` tags remain on Docker Hub but are no longer built, and get no
 fixes.

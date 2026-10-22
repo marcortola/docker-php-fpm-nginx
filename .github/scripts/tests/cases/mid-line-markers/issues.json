@@ -1,0 +1,12 @@
+[
+  {
+    "number": 4,
+    "url": "https://api.github.com/repos/example/repo/issues/4",
+    "title": "Security update: PHP 8.5.10",
+    "state": "closed",
+    "body": "The rebuild succeeded and the published images carry the fix.\n\n<!-- security-watch:fingerprint=5cfc8ae0f8bb0922 -->\n<!-- security-watch:php-notified=8.5:8.5.10 -->\n\n- [PHP 8.5.9](https://www.php.net/releases/8_5_9.php) (30 Jul 2026 <!-- security-watch:php-notified=8.5:8.5.12 --> <!-- security-watch:fingerprint=4c0c4b15ebd66860 -->)\n<!-- security-watch:php-notified=8.5:8.5.12 --> after\n<!-- security-watch:fingerprint=4c0c4b15ebd66860 --> after\nbefore <!-- security-watch:fingerprint=4c0c4b15ebd66860 -->\nbefore <!-- security-watch:php-notified=8.5:8.5.12 -->",
+    "user": {
+      "login": "github-actions[bot]"
+    }
+  }
+]
