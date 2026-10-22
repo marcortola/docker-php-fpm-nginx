@@ -1,0 +1,10 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.69.3"
+  },
+  "ArtifactName": "marcortola/php-fpm-nginx:8.5",
+  "ArtifactType": "container_image",
+  "Metadata": {},
+  "Results": []
+}

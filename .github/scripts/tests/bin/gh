@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Test double for the gh API calls security-watch.sh makes. Records each call, with its request
+# body, as one line in $CALLS and answers from fixtures.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=stub-lib.sh
+. "$(dirname "$0")/stub-lib.sh"
+
+[ "${1:-}" = api ] || { echo "gh stub: unexpected command: $*" >&2; exit 1; }
+shift
+method=GET path='' body=''
+while [ $# -gt 0 ]; do
+	case $1 in
+		-X | --method) method=$2; shift 2 ;;
+		--paginate) shift ;;
+		-f | -F) body+="$2 "; shift 2 ;;
+		--input)
+			[ "$2" = - ] || { echo "gh stub: --input $2 is not stdin" >&2; exit 1; }
+			body=$(jq -c .)
+			shift 2
+			;;
+		-*) echo "gh stub: unexpected option $1" >&2; exit 1 ;;
+		*) path=$1; shift ;;
+	esac
+done
+printf 'gh %s %s %s\n' "$method" "$path" "$body" >> "$CALLS"
+
+route=${path#"repos/$REPOSITORY/"}
+case "$method $route" in
+	'GET issues?'*)
+		if [[ $route == *state=open* ]]; then
+			fixture issues.json | jq '[.[] | select(.state == "open")]'
+		else
+			fixture issues.json
+		fi
+		;;
+	'GET issues/comments?'*) fixture comments.json ;;
+	'GET labels?'*) fixture labels.json ;;
+	'POST labels') echo '{}' ;;
+	'GET actions/workflows/ci.yml/runs?'*) fixture ci-runs.json ;;
+	'POST actions/workflows/ci.yml/dispatches') fixture dispatch.json ;;
+	'GET actions/runs/'*)
+		# A run fixture that is an array answers each poll with its next element, then repeats
+		# the last one. A completed answer marks the images as rebuilt for the docker stub.
+		id=${route#actions/runs/}
+		polls=$(cat "$STUB_STATE/polls-$id" 2> /dev/null || echo 0)
+		echo $((polls + 1)) > "$STUB_STATE/polls-$id"
+		run=$(fixture "run-$id.json" | jq --argjson n "$polls" 'if type == "array" then .[[$n, length - 1] | min] else . end')
+		if jq -e '.status == "completed"' <<< "$run" > /dev/null; then touch "$STUB_STATE/rebuilt"; fi
+		printf '%s\n' "$run"
+		;;
+	'POST issues') echo "{\"number\": 100, \"html_url\": \"https://github.com/$REPOSITORY/issues/100\"}" ;;
+	'POST issues/'*'/comments') echo '{}' ;;
+	*) echo "gh stub: unexpected call $method $path" >&2; exit 1 ;;
+esac

@@ -5,8 +5,9 @@ on:
   push:
     branches: [ main ]
   pull_request:
-  # Weekly rebuild so published tags pick up upstream php:*-fpm-alpine security releases
-  # without waiting for a commit.
+  # Weekly rebuild so published tags pick up routine upstream php:*-fpm-alpine and Alpine package
+  # updates without waiting for a commit. security-watch.yml dispatches this workflow as soon as a
+  # security fix is available.
   schedule:
     - cron: '17 2 * * 1'
 
@@ -32,7 +33,7 @@ jobs:
       max-parallel: 4
       matrix:
         target: [ base, debug ]
-        php: [ 8.2, 8.3, 8.4, 8.5 ]
+        php: [ 8.2, 8.5 ]
 
     steps:
       - name: Checkout
@@ -305,11 +306,28 @@ jobs:
           cache-from: ${{ !(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && format('type=gha,scope=php-{0}-{1}', matrix.php, matrix.target) || '' }}
           cache-to: type=gha,scope=php-${{ matrix.php }}-${{ matrix.target }},mode=max
 
+  # The security watch's decision logic runs against fixtures here, since security-watch.yml
+  # itself only runs on a schedule or by hand on main. Scheduled and dispatched rebuilds skip it.
+  security_watch_tests:
+    name: Test security watch
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Lint scripts
+        run: shellcheck -x .github/scripts/*.sh .github/scripts/tests/run.sh .github/scripts/tests/bin/*
+
+      - name: Run fixture tests
+        run: .github/scripts/tests/run.sh
+
   # Aggregates the matrix above into one check with a stable name. The individual legs are
   # named "Test MAIN (base, 8.5)" and so on, so they expand and rename whenever the matrix
-  # changes and cannot be listed as required status checks on the branch. This job can.
+  # changes and cannot be listed as required status checks on the branch. This job can, and it
+  # also gates the security watch tests, which run only on pull requests and pushes.
   ci-complete:
-    needs: test_main
+    needs: [ test_main, security_watch_tests ]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -317,6 +335,12 @@ jobs:
         if: needs.test_main.result != 'success'
         run: |
           echo "test_main concluded: ${{ needs.test_main.result }}"
+          exit 1
+
+      - name: Fail unless the security watch tests passed or were skipped
+        if: needs.security_watch_tests.result != 'success' && needs.security_watch_tests.result != 'skipped'
+        run: |
+          echo "security_watch_tests concluded: ${{ needs.security_watch_tests.result }}"
           exit 1
 
   # GitHub disables scheduled workflows in public repositories after 60 days without repository

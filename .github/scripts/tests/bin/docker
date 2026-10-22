@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Test double for `docker buildx imagetools inspect --format '{{json .Image}}' <ref>`. Answers
+# with a two-platform image config whose PHP_VERSION comes from the `images` fixture, or from
+# `images-after` once the gh stub has reported a finished ci.yml run.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=stub-lib.sh
+. "$(dirname "$0")/stub-lib.sh"
+
+[ "${1:-} ${2:-} ${3:-}" = 'buildx imagetools inspect' ] || { echo "docker stub: unexpected command: $*" >&2; exit 1; }
+ref=${*: -1}
+printf 'docker inspect %s\n' "$ref" >> "$CALLS"
+images='images'
+if [ -e "$STUB_STATE/rebuilt" ] && [ -f "$FIXTURES/images-after" ]; then images='images-after'; fi
+version=$(fixture "$images" | awk -v ref="$ref" '$1 == ref { print $2 }')
+[ -n "$version" ] || { echo "ERROR: $ref: not found" >&2; exit 1; }
+jq -n --arg version "$version" '{
+	"linux/amd64": {config: {Env: ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "PHP_VERSION=\($version)"]}},
+	"linux/arm64": {config: {Env: ["PHP_VERSION=\($version)"]}}
+}'

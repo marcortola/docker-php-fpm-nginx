@@ -1,0 +1,9 @@
+[
+  {
+    "number": 4,
+    "url": "https://api.github.com/repos/example/repo/issues/4",
+    "title": "Security update: PHP 8.5.10",
+    "state": "closed",
+    "body": "The rebuild succeeded and the published images carry the fix.\n\n<!-- security-watch:fingerprint=5cfc8ae0f8bb0922 -->"
+  }
+]

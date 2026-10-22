@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test double for the php.net release feed and the Docker Hub tag API.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=stub-lib.sh
+. "$(dirname "$0")/stub-lib.sh"
+
+url=${*: -1}
+printf 'curl %s\n' "$url" >> "$CALLS"
+case $url in
+	'https://www.php.net/releases/index.php?json&version='*'&max=20')
+		version=${url#*version=}
+		fixture "feed-${version%%&*}.json" || exit 22
+		;;
+	'https://hub.docker.com/v2/repositories/library/php/tags/'*)
+		fixture "hub-${url##*/}.json" || exit 22
+		;;
+	*) echo "curl stub: unexpected URL $url" >&2; exit 1 ;;
+esac

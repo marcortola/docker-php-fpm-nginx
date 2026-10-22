@@ -1,0 +1,6 @@
+php:8.2-fpm-alpine 8.2.35
+php:8.5-fpm-alpine 8.5.10
+marcortola/php-fpm-nginx:8.2 8.2.35
+marcortola/php-fpm-nginx:8.2-debug 8.2.35
+marcortola/php-fpm-nginx:8.5 8.5.9
+marcortola/php-fpm-nginx:8.5-debug 8.5.9
