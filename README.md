@@ -20,6 +20,13 @@ once it passes again.
 The `7.4`, `8.1`, `8.3` and `8.4` tags remain on Docker Hub but are no longer built, and get no
 fixes.
 
+## Local example
+
+`docker compose up -d` runs the published `8.5` (port 10000) and `8.5-debug` (port 10001) images in
+non-root mode against `example/public`. The default server takes its document root and front
+controller from `/etc/nginx/server-default/*.conf`; `example/site.conf` shows the shape a consumer
+ships.
+
 ## Non-root mode
 
 By default the container starts as root. supervisord and the nginx and php-fpm masters run as

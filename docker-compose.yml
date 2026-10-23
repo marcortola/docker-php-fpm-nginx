@@ -1,22 +1,30 @@
-version: "3.8"
-
+# Local example of the published image: the production and debug variants serve example/public.
+# The image's default server takes its document root from /etc/nginx/server-default/*.conf.
 services:
 
   app_prod:
-    image: marcortola/php-fpm-nginx
+    image: marcortola/php-fpm-nginx:8.5
+    # The host user with group 0 runs the image in its non-root mode (see README.md).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - "0"
     ports:
       - '10000:80'
     volumes:
-      - ./:/var/www
-      - ./etc/nginx/site.conf:/etc/nginx/conf.d/site.conf
+      - ./example:/var/www
+      - ./example/site.conf:/etc/nginx/server-default/site.conf:ro
 
   app_dev:
-    image: marcortola/php-fpm-nginx:debug
+    image: marcortola/php-fpm-nginx:8.5-debug
+    # The host user with group 0 runs the image in its non-root mode (see README.md).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - "0"
     ports:
       - '10001:80'
     volumes:
-      - ./:/var/www
-      - ./etc/nginx/site.conf:/etc/nginx/conf.d/site.conf
+      - ./example:/var/www
+      - ./example/site.conf:/etc/nginx/server-default/site.conf:ro
     environment:
       - XDEBUG_MODE=${XDEBUG_MODE:-debug}
     extra_hosts:
