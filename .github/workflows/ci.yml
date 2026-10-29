@@ -123,6 +123,14 @@ jobs:
         run: |
           curl http://localhost:10000
 
+          # Dot paths are denied, except /.well-known/, which falls through to the default server
+          # (no file there, so 404) instead of nginx's 403.
+          dot_status() { curl --silent --output /dev/null --write-out '%{http_code}' "http://localhost:10000$1"; }
+          for path in /.env /.git/config /.well-known/.env; do
+            [ "$(dot_status "$path")" = 403 ] || { echo "$path is not denied"; exit 1; }
+          done
+          [ "$(dot_status /.well-known/oauth-authorization-server)" = 404 ] || { echo '/.well-known/ is denied'; exit 1; }
+
           # Root mode renders the non-root switches as before: the pid under /var/run, the fpm
           # socket chowned to www-data and nginx's compiled-in temp paths. Rendering again by
           # hand, outside the entrypoint, must give the same lines.

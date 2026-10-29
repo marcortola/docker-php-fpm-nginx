@@ -27,6 +27,9 @@ non-root mode against `example/public`. The default server takes its document ro
 controller from `/etc/nginx/server-default/*.conf`; `example/site.conf` shows the shape a consumer
 ships.
 
+The default server denies every dot path (`/.env`, `/.git/...`) except `/.well-known/`, which is
+served like any other path, so a front controller can answer OAuth discovery or ACME challenges.
+
 ## Non-root mode
 
 By default the container starts as root. supervisord and the nginx and php-fpm masters run as
