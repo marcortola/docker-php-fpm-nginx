@@ -93,7 +93,12 @@ http {
             add_header Cache-Control "public, no-transform";
         }
 
-        location ~ /\. {
+        # Dot paths (/.env, /.git/...) stay hidden, except /.well-known/ (RFC 8615), which holds
+        # documents clients are meant to fetch: OAuth discovery (RFC 8414, RFC 9728), ACME
+        # challenges, security.txt. Those requests fall through to the server-default locations,
+        # so a front controller can answer them. A dot segment below it (/.well-known/.env) is
+        # still denied, because the regex matches any later "/." as well.
+        location ~ /\.(?!well-known/) {
             access_log off;
             log_not_found off;
             deny all;
