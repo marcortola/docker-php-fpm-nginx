@@ -290,6 +290,76 @@ jobs:
           check_args 1000:1000 '-c /var/www/custom.conf' supervisord -c /var/www/custom.conf
           check_args 0:0 '-c /etc/supervisord.conf --nodaemon' supervisord -c /etc/supervisord.conf --nodaemon
 
+      # The default server caches static files by extension. A path that only ends in those
+      # letters, such as a token ending in "Js", must still reach the application's front
+      # controller. Serves the example app as docker-compose.yml does, in root mode, from a copy
+      # that adds one real asset.
+      - name: Test static asset location
+        if: steps.changes.outputs.run == 'true'
+        timeout-minutes: 2
+        run: |
+          www="$RUNNER_TEMP/static-www"
+          cp -R example "$www"
+          echo 'console.log("asset");' > "$www/public/app.js"
+
+          trap 'status=$?; [ "$status" -eq 0 ] || docker logs test-static; docker rm -f test-static > /dev/null; exit "$status"' EXIT
+          docker run -d \
+            --name test-static \
+            -p 10002:80 \
+            -v "$www:/var/www" \
+            -v "$www/site.conf:/etc/nginx/server-default/site.conf:ro" \
+            --health-cmd "/usr/local/bin/healthcheck.sh" \
+            --health-interval=30s \
+            --health-timeout=30s \
+            --health-start-period=60s \
+            --health-start-interval=1s \
+            php-fpm-nginx:ci
+
+          while status="$(docker inspect -f '{{ .State.Health.Status }}' test-static)"; do
+            case $status in
+              starting) sleep 1;;
+              healthy) break;;
+              *) echo "container is $status"; exit 1;;
+            esac
+          done
+          [ "$status" = healthy ]
+
+          # Sets $code and $body, and writes the response headers, without CRs, to $headers.
+          headers="$RUNNER_TEMP/static-headers"
+          fetch() {
+            code="$(curl --silent --show-error --output "$RUNNER_TEMP/static-body" --dump-header "$headers.raw" \
+              --write-out '%{http_code}' "http://localhost:10002$1")"
+            body="$(cat "$RUNNER_TEMP/static-body")"
+            tr -d '\r' < "$headers.raw" > "$headers"
+          }
+
+          fetch /
+          front=$body
+          case $front in
+            'php-fpm-nginx example: PHP '*) ;;
+            *) echo "/ answered $code: $front"; exit 1;;
+          esac
+
+          # No dot before the extension letters: the front controller answers.
+          for path in /register/abcJs /x/xpng; do
+            fetch "$path"
+            [ "$code" = 200 ] && [ "$body" = "$front" ] || { echo "$path answered $code instead of the front controller: $body"; exit 1; }
+          done
+
+          # A real asset is served with the long-lived cache headers of `expires max`.
+          fetch /app.js
+          [ "$code" = 200 ] && [ "$body" = 'console.log("asset");' ] || { echo "/app.js answered $code: $body"; exit 1; }
+          for line in 'Cache-Control: public, no-transform' 'Cache-Control: max-age=315360000' 'Expires: Thu, 31 Dec 2037 23:55:55 GMT'; do
+            grep -qxF "$line" "$headers" || { echo "/app.js lacks '$line':"; cat "$headers"; exit 1; }
+          done
+
+          # A missing asset stays nginx's 404 and never reaches the front controller.
+          fetch /missing.js
+          [ "$code" = 404 ] || { echo "/missing.js answered $code: $body"; exit 1; }
+          if grep -qF 'php-fpm-nginx example' "$RUNNER_TEMP/static-body"; then
+            echo '/missing.js reached the front controller'; exit 1
+          fi
+
       - name: Login to Docker Hub
         if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
